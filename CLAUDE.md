@@ -5,7 +5,8 @@ Browser app for 2D landmarking on images. Plain JavaScript, no framework, no bui
 ## Structure
 
 - `src/core.js`: all format logic, pure and DOM-free (UMD: `window.LmkCore` in the browser, `require` in Node). New logic goes here so it can be unit tested.
-- `src/app.js`: UI only. It keeps one state object `S` (document fields from `LmkCore.newState()` plus UI fields) and exposes `window.__lmk = { S, C }` for the browser tests.
+- `src/template-editor.js`: the Template tab, deliberately close to Landmarker3D's `js/template-editor.js` so both apps behave the same. Its edits call `core.js` functions (`addDefs`, `updateDef`, `updateCurve`, …) through `mutate()`, which records one undo step per change.
+- `src/app.js`: UI only (side panel tabs: Landmarks, Template, Specimen). It keeps one state object `S` (document fields from `LmkCore.newState()` plus UI fields) and exposes `window.__lmk = { S, C }` for the browser tests.
 - Must keep working when opened from `file://`: classic `<script src>` only, no ES module imports.
 
 ## File format rules (landmark-json 0.2, 2D)

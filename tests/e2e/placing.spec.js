@@ -1,7 +1,7 @@
 'use strict';
 // Placing, editing and calibrating on the built-in sample specimen.
 const { test, expect } = require('@playwright/test');
-const { openApp, clickImage, imgToPage, viewScale, getState, setTemplate, row } = require('./helpers.js');
+const { openTab, openApp, clickImage, imgToPage, viewScale, getState, setTemplate, row } = require('./helpers.js');
 
 test('the sample opens with progress, selection and no errors', async ({ page }) => {
   const errors = await openApp(page);
@@ -114,6 +114,7 @@ test('N jumps to the next unfinished item', async ({ page }) => {
 
 test('measuring a scale bar sets units per pixel', async ({ page }) => {
   await openApp(page);
+  await openTab(page, 'Specimen');
   await page.locator('[data-act="scale-remove"]').click();
   await expect(page.locator('#scaleBox')).toContainText('Uncalibrated');
   await page.locator('[data-act="scale-start"]').click();
@@ -131,6 +132,7 @@ test('measuring a scale bar sets units per pixel', async ({ page }) => {
 
 test('entering a scale value directly', async ({ page }) => {
   await openApp(page);
+  await openTab(page, 'Specimen');
   await page.locator('[data-act="scale-manual"]').click();
   await page.locator('#manVal').fill('0.0125');
   await page.locator('#manUnits').selectOption('mm');
@@ -151,9 +153,10 @@ test('ad hoc points are placed, labelled and listed separately', async ({ page }
   await expect(row(page, 'AH01')).toContainText('Leaf spot');
 });
 
-test('the template editor applies a new template and reports mistakes', async ({ page }) => {
+test('editing the template as text applies it and reports mistakes', async ({ page }) => {
   await openApp(page);
-  await page.locator('[data-act="tpl-edit"]').click();
+  await openTab(page, 'Template');
+  await page.locator('[data-act="tpl-text"]').click();
   await expect(page.locator('#tplText')).toHaveValue(/LM01 \| Petiole base/);
   await page.locator('#tplText').fill('LM01 | A\nLM01 | B');
   await page.getByRole('button', { name: 'Apply template' }).click();

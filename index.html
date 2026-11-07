@@ -39,7 +39,7 @@
     <section class="stage" id="stage" aria-label="Image">
       <canvas id="cv"></canvas>
       <div class="sample-tag" id="sampleTag" hidden><b>Sample image.</b> Open your own image to start.</div>
-      <div class="hint" id="hint"></div>
+      <div class="stage-hint" id="hint"></div>
       <div class="zoom">
         <button type="button" id="zOut" title="Zoom out (−)">−</button>
         <span id="zPct">100%</span>
@@ -51,33 +51,55 @@
 
     <aside class="side" id="side">
       <div class="sec" id="warnSec" hidden></div>
-      <div class="sec">
-        <div class="eyebrow">Specimen</div>
-        <div class="field"><label for="spId">ID</label><input type="text" id="spId" spellcheck="false"></div>
-        <div class="field"><label for="spNotes">Notes</label><input type="text" id="spNotes"></div>
-        <div class="field"><label for="opName">Operator</label><input type="text" id="opName" placeholder="e.g. student01" spellcheck="false"></div>
-        <div class="meta" id="imgMeta"></div>
-        <div class="scalebox" id="scaleBox"></div>
+      <div class="tablist" role="tablist" aria-label="Panel">
+        <button type="button" class="tab" role="tab" id="t-landmarks" aria-controls="tab-landmarks" aria-selected="true">Landmarks</button>
+        <button type="button" class="tab" role="tab" id="t-template" aria-controls="tab-template" aria-selected="false" tabindex="-1">Template</button>
+        <button type="button" class="tab" role="tab" id="t-specimen" aria-controls="tab-specimen" aria-selected="false" tabindex="-1">Specimen</button>
       </div>
-      <div class="sec">
-        <div class="eyebrow">Template <span class="count" id="tplCount"></span></div>
-        <div><div class="tplname" id="tplName"></div><div class="tplsub" id="tplSub"></div></div>
-        <div class="prog"><i id="tplProg" style="width:0"></i></div>
-        <div class="inline">
-          <button class="btn sm" type="button" data-act="tpl-edit">Edit</button>
-          <button class="btn sm" type="button" data-act="tpl-load">Load…</button>
-          <button class="btn sm" type="button" data-act="tpl-save">Save template</button>
-          <button class="btn sm" type="button" data-act="adhoc" title="Place a point that is not in the template">+ Ad hoc point</button>
+
+      <!-- Landmarks: what to place next -->
+      <div class="tabpanel" role="tabpanel" id="tab-landmarks" aria-labelledby="t-landmarks">
+        <div class="sec">
+          <div class="eyebrow">Template <span class="count" id="tplCount"></span></div>
+          <div class="tplhead"><div><div class="tplname" id="tplName"></div><div class="tplsub" id="tplSub"></div></div>
+            <button class="btn sm" type="button" data-act="goto-template">Edit template</button></div>
+          <div class="prog"><i id="tplProg" style="width:0"></i></div>
+          <div class="list" id="list"></div>
+          <div class="inline">
+            <button class="btn sm" type="button" data-act="adhoc" title="Place a point that is not in the template">+ Ad hoc point</button>
+          </div>
         </div>
-        <div class="list" id="list"></div>
+        <div class="sec" id="detail"></div>
+        <div class="sec">
+          <div class="eyebrow">Keys</div>
+          <div class="keys">
+            Click to place · drag a point to move · drag empty space to pan · wheel to zoom<br>
+            <kbd>N</kbd> next to-do · <kbd>E</kbd> estimated · <kbd>M</kbd> missing · <kbd>Del</kbd> clear<br>
+            <kbd>⌫</kbd> remove last curve point · <kbd>F</kbd> fit · <kbd>L</kbd> labels · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo
+          </div>
+        </div>
       </div>
-      <div class="sec" id="detail"></div>
-      <div class="sec">
-        <div class="eyebrow">Keys</div>
-        <div class="keys">
-          Click to place · drag a point to move · drag empty space to pan · wheel to zoom<br>
-          <kbd>N</kbd> next to-do · <kbd>E</kbd> estimated · <kbd>M</kbd> missing · <kbd>Del</kbd> clear<br>
-          <kbd>⌫</kbd> remove last curve point · <kbd>F</kbd> fit · <kbd>L</kbd> labels · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo
+
+      <!-- Template: the landmarking protocol -->
+      <div class="tabpanel" role="tabpanel" id="tab-template" aria-labelledby="t-template" hidden>
+        <div class="sec" id="tplEditor"></div>
+      </div>
+
+      <!-- Specimen: image, ID, scale -->
+      <div class="tabpanel" role="tabpanel" id="tab-specimen" aria-labelledby="t-specimen" hidden>
+        <div class="sec">
+          <div class="eyebrow">Specimen</div>
+          <div class="field"><label for="spId">ID</label><input type="text" id="spId" spellcheck="false"></div>
+          <div class="field"><label for="spNotes">Notes</label><input type="text" id="spNotes"></div>
+          <div class="field"><label for="opName">Operator</label><input type="text" id="opName" placeholder="e.g. student01" spellcheck="false"></div>
+        </div>
+        <div class="sec">
+          <div class="eyebrow">Image</div>
+          <div class="meta" id="imgMeta"></div>
+        </div>
+        <div class="sec">
+          <div class="eyebrow">Scale</div>
+          <div class="scalebox" id="scaleBox"></div>
         </div>
       </div>
     </aside>
@@ -93,7 +115,7 @@
 
 <dialog id="dTpl">
   <form class="dlg" id="tplForm" method="dialog">
-    <h2>Edit template</h2>
+    <h2>Edit template as text</h2>
     <p>One landmark per line: <code>LM01 | Name | description | pair=LM02</code>. Curves: <code>curve C01 | Name | start=LM02 end=LM03 n=10 path=spline</code> (add <code>closed</code> for loops; path is <code>polyline</code> or <code>spline</code>). Lines starting with <code>#</code> set the id, name and version. List order is export order. Ids never change once data exists; names can.</p>
     <textarea id="tplText" spellcheck="false" aria-label="Template text"></textarea>
     <div class="err" id="tplErr"></div>
@@ -118,6 +140,7 @@
 
 <div class="toast" id="toast" hidden></div>
 <script src="src/core.js"></script>
+<script src="src/template-editor.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 // Opening images and files, saving, autosave and exports, as a student would use them.
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
-const { openApp, clickImage, viewScale, getState, download, pngFile, setTemplate, row } = require('./helpers.js');
+const { openTab, openApp, clickImage, viewScale, getState, download, pngFile, setTemplate, row } = require('./helpers.js');
 
 const TEMPLATE = '# id: mini\n# name: Mini set\n# version: 1.0\nLM01 | Left corner\nLM02 | Right corner\ncurve C01 | Top edge | start=LM01 end=LM02 n=4 path=polyline';
 
@@ -27,6 +27,7 @@ async function landmarkOwnImage(page, testInfo) {
 test('a full session: own image, template, placing, save .lmk.json', async ({ page }, testInfo) => {
   const errors = await openApp(page);
   const img = await landmarkOwnImage(page, testInfo);
+  await openTab(page, 'Specimen');
   await page.locator('#opName').fill('student01');
   await page.locator('#opName').blur();
   const { name, text } = await download(page, '#bSave');
@@ -75,6 +76,7 @@ test('TPS and CSV exports', async ({ page }, testInfo) => {
 test('saving a template and loading it into a new session', async ({ page }, testInfo) => {
   await openApp(page);
   await landmarkOwnImage(page, testInfo);
+  await openTab(page, 'Template');
   const tpl = await download(page, '[data-act="tpl-save"]');
   expect(tpl.name).toBe('mini.template.json');
   const t = JSON.parse(tpl.text);

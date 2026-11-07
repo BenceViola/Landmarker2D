@@ -9,17 +9,18 @@ const read = p => readFile(new URL(p, root), 'utf8');
 
 const html = await read('index.html');
 const css = await read('src/styles.css');
-const core = await read('src/core.js');
-const app = await read('src/app.js');
 const { version } = JSON.parse(await read('package.json'));
 
 const guardScript = s => s.replace(/<\/script/gi, '<\\/script');
 let page = html
   .replace('<link rel="stylesheet" href="src/styles.css">', () => `<style>\n${css}</style>`)
-  .replace('<script src="src/core.js"></script>', () => `<script>\n${guardScript(core)}</script>`)
-  .replace('<script src="src/app.js"></script>', () => `<script>\n${guardScript(app)}</script>`)
   .replace('<head>', `<head>\n<!-- landmarker2D ${version} single-file build -->`);
-if (/src\/(styles\.css|core\.js|app\.js)/.test(page)) throw new Error('build: a source file was not inlined');
+// inline every <script src="src/…"> in page order
+for (const [tag, file] of [...page.matchAll(/<script src="(src\/[\w.-]+\.js)"><\/script>/g)]) {
+  const js = await read(file);
+  page = page.replace(tag, () => `<script>\n${guardScript(js)}</script>`);
+}
+if (/(href|src)="src\//.test(page)) throw new Error('build: a source file was not inlined');
 
 const head = page.match(/<head>([\s\S]*?)<\/head>/)[1]
   .replace(/<meta charset[^>]*>\s*/i, '')

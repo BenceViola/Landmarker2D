@@ -58,12 +58,18 @@ function pngFile(testInfo, name, w, h, seed = 0) {
   return { path, sha256: crypto.createHash('sha256').update(buf).digest('hex'), width: w, height: h };
 }
 
+/** Switch the side panel to a tab: 'Landmarks', 'Template' or 'Specimen'. */
+const openTab = (page, name) => page.getByRole('tab', { name }).click();
+
+/** Replace the template through Template → Edit as text, then go back to the Landmarks tab. */
 async function setTemplate(page, text) {
-  await page.locator('[data-act="tpl-edit"]').click();
+  await openTab(page, 'Template');
+  await page.locator('[data-act="tpl-text"]').click();
   await page.locator('#tplText').fill(text);
   await page.getByRole('button', { name: 'Apply template' }).click();
+  await openTab(page, 'Landmarks');
 }
 
 const row = (page, id) => page.locator(`.row[data-id="${id}"]`);
 
-module.exports = { openApp, imgToPage, clickImage, viewScale, getState, download, pngFile, setTemplate, row };
+module.exports = { openTab, openApp, imgToPage, clickImage, viewScale, getState, download, pngFile, setTemplate, row };

@@ -342,6 +342,194 @@
     s.curves = s.curves.filter(c => tCurve(s, c.template_id));
   }
 
+  /* ---------- template editing ----------
+   * Used by the Template tab. Functions that can be refused return an error
+   * message for the student, or null when the change was applied. */
+  const ID_RE = /^[A-Za-z0-9_.-]+$/;
+  const TEMPLATE_FIELDS = ['id', 'name', 'version', 'description', 'author'];
+  const MAX_CURVE_POINTS = 500;
+
+  const idInUse = (s, id) => !!(tLm(s, id) || tCurve(s, id) || lmEntry(s, id) || curveEntry(s, id));
+  /** Next free id of the form LM01, LM02… or C01, C02… */
+  function nextId(s, prefix) {
+    const re = new RegExp('^' + prefix + '(\\d+)$');
+    let n = 0;
+    for (const x of [...(s.template.landmarks || []), ...(s.template.curves || []), ...s.landmarks, ...s.curves]) {
+      const m = re.exec(x.id);
+      if (m) n = Math.max(n, Number(m[1]));
+    }
+    let id;
+    do { n++; id = prefix + String(n).padStart(2, '0'); } while (idInUse(s, id));
+    return id;
+  }
+  function checkNewId(s, oldId, newId, hasData) {
+    if (newId === oldId) return null;
+    if (!newId) return 'Every item needs an ID.';
+    if (!ID_RE.test(newId)) return 'IDs can only use letters, digits, “-”, “_” and “.”.';
+    if (idInUse(s, newId)) return `${newId} is already used.`;
+    if (hasData) return 'This already has data, so its ID can’t change.';
+    return null;
+  }
+  const renameInOrder = (t, from, to) => {
+    if (Array.isArray(t.export_order)) t.export_order = t.export_order.map(x => (x === from ? to : x));
+  };
+  const dropFromOrder = (t, id) => {
+    if (Array.isArray(t.export_order)) t.export_order = t.export_order.filter(x => x !== id);
+  };
+
+  function setTemplateField(s, field, value) {
+    if (!TEMPLATE_FIELDS.includes(field)) throw new Error('Unknown template field ' + field);
+    const v = String(value == null ? '' : value).trim();
+    if (field === 'id') {
+      if (!v) return 'The template needs an ID.';
+      if (!ID_RE.test(v)) return 'Template IDs can only use letters, digits, “-”, “_” and “.”.';
+    }
+    if (v) s.template[field] = v; else delete s.template[field];
+    return null;
+  }
+
+  /** Add landmarks by name (blank lines are skipped). Returns the new ids. */
+  function addDefs(s, names) {
+    s.template.landmarks = s.template.landmarks || [];
+    const ids = [];
+    for (const raw of names) {
+      const name = String(raw).trim();
+      if (!name) continue;
+      const id = nextId(s, 'LM');
+      s.template.landmarks.push({ id, name });
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  /** patch: { id?, name?, description? } */
+  function updateDef(s, id, patch) {
+    const def = tLm(s, id);
+    if (!def) return null;
+    const newId = 'id' in patch ? String(patch.id).trim() : id;
+    const err = checkNewId(s, id, newId, !!lmEntry(s, id));
+    if (err) return err;
+    const name = 'name' in patch ? String(patch.name).trim() : def.name;
+    if (!name) return 'Every landmark needs a name.';
+    def.name = name;
+    if ('description' in patch) {
+      const d = String(patch.description).trim();
+      if (d) def.description = d; else delete def.description;
+    }
+    if (newId !== id) {
+      def.id = newId;
+      for (const d of s.template.landmarks) if (d.bilateral_pair === id) d.bilateral_pair = newId;
+      for (const c of s.template.curves || []) { if (c.start === id) c.start = newId; if (c.end === id) c.end = newId; }
+      renameInOrder(s.template, id, newId);
+    }
+    return null;
+  }
+
+  /** Remove a landmark from the template, with its placed point. Curves that started or ended on it get a free end. */
+  function removeDef(s, id) {
+    const t = s.template;
+    const i = (t.landmarks || []).findIndex(d => d.id === id);
+    if (i < 0) return;
+    t.landmarks.splice(i, 1);
+    s.landmarks = s.landmarks.filter(e => e.template_id !== id && e.id !== id);
+    for (const d of t.landmarks) if (d.bilateral_pair === id) delete d.bilateral_pair;
+    for (const c of t.curves || []) { if (c.start === id) delete c.start; if (c.end === id) delete c.end; }
+    dropFromOrder(t, id);
+  }
+
+  /** Move a landmark ('lm') or curve ('curve') up (-1) or down (+1). The list order becomes the export order. */
+  function moveItem(s, kind, id, delta) {
+    const list = kind === 'curve' ? s.template.curves : s.template.landmarks;
+    if (!list) return;
+    const i = list.findIndex(d => d.id === id), j = i + delta;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    delete s.template.export_order;
+  }
+
+  /** Bilateral pairs are kept symmetric: setting A↔B clears any old partners of A and B. */
+  function setPair(s, id, otherId) {
+    const def = tLm(s, id);
+    otherId = otherId || null;
+    if (!def || otherId === id || (def.bilateral_pair || null) === otherId) return;
+    const other = otherId ? tLm(s, otherId) : null;
+    if (otherId && !other) return;
+    const unpair = d => {
+      if (!d || !d.bilateral_pair) return;
+      const partner = tLm(s, d.bilateral_pair);
+      if (partner && partner.bilateral_pair === d.id) delete partner.bilateral_pair;
+      delete d.bilateral_pair;
+    };
+    unpair(def);
+    if (other) { unpair(other); def.bilateral_pair = otherId; other.bilateral_pair = id; }
+  }
+
+  function addCurve(s, name) {
+    const n = String(name || '').trim();
+    if (!n) return null;
+    s.template.curves = s.template.curves || [];
+    const id = nextId(s, 'C');
+    s.template.curves.push({ id, name: n, n_points: 10, path: 'polyline', spacing: 'equal_arc_length' });
+    return id;
+  }
+
+  /** patch: { id?, name?, description?, start?, end?, n_points?, path?, closed? } */
+  function updateCurve(s, id, patch) {
+    const c = tCurve(s, id);
+    if (!c) return null;
+    const newId = 'id' in patch ? String(patch.id).trim() : id;
+    const err = checkNewId(s, id, newId, !!curveEntry(s, id));
+    if (err) return err;
+    const name = 'name' in patch ? String(patch.name).trim() : c.name;
+    if (!name) return 'Every curve needs a name.';
+    let n = c.n_points != null ? c.n_points : 10;
+    if ('n_points' in patch) {
+      n = Number(patch.n_points);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_CURVE_POINTS) return `The number of points must be a whole number from 1 to ${MAX_CURVE_POINTS}.`;
+    }
+    const path = 'path' in patch ? patch.path : (c.path || 'polyline');
+    if (!['polyline', 'spline'].includes(path)) return 'The path must be straight segments (polyline) or a smooth curve (spline).';
+    const closed = 'closed' in patch ? !!patch.closed : !!c.closed;
+    const ends = {};
+    for (const k of ['start', 'end']) {
+      ends[k] = k in patch ? (patch[k] || null) : (c[k] || null);
+      if (ends[k] && !tLm(s, ends[k])) return `${ends[k]} is not a landmark in this template.`;
+    }
+    if (!closed && ends.start && ends.start === ends.end) return 'A curve can’t start and end on the same landmark. Make it a closed loop instead.';
+
+    c.name = name;
+    c.n_points = n;
+    c.path = path;
+    if (!c.spacing) c.spacing = 'equal_arc_length';
+    if ('description' in patch) {
+      const d = String(patch.description).trim();
+      if (d) c.description = d; else delete c.description;
+    }
+    if (closed) { c.closed = true; delete c.start; delete c.end; }
+    else {
+      delete c.closed;
+      for (const k of ['start', 'end']) { if (ends[k]) c[k] = ends[k]; else delete c[k]; }
+    }
+    if (newId !== id) { c.id = newId; renameInOrder(s.template, id, newId); }
+    return null;
+  }
+
+  function removeCurve(s, id) {
+    const t = s.template;
+    const i = (t.curves || []).findIndex(c => c.id === id);
+    if (i < 0) return;
+    t.curves.splice(i, 1);
+    s.curves = s.curves.filter(c => c.template_id !== id && c.id !== id);
+    dropFromOrder(t, id);
+  }
+
+  /** Start over with an empty template: removes every placed point (the app keeps this as one undo step). */
+  function newTemplate(s) {
+    s.template = emptyTemplate();
+    s.landmarks = [];
+    s.curves = [];
+  }
+
   /* ---------- documents ---------- */
   function sortedEntries(s) {
     const order = new Map(items(s).map((x, i) => [x.id, i]));
@@ -467,6 +655,8 @@
     placeLm, ensureCurve, newAdhocId, addAdhoc, setStatus, clearItem,
     scaleFromBar,
     tplToText, textToTpl, checkTemplate, applyTemplate,
+    ID_RE, MAX_CURVE_POINTS, nextId, setTemplateField, addDefs, updateDef, removeDef, moveItem, setPair,
+    addCurve, updateCurve, removeCurve, newTemplate,
     sortedEntries, buildDoc, parseDoc, sniffJson,
     exportRows, notDoneCount, toTPS, toCSV,
   };

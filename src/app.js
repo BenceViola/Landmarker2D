@@ -21,6 +21,16 @@ const S = Object.assign(C.newState(), {
 });
 window.__lmk = { S, C };   // used by the end-to-end tests
 
+// The Template tab (src/template-editor.js)
+const tplEditor = new window.LmkTemplateEditor($('#tplEditor'), {
+  S, C,
+  mutate: fn => mutate(fn),
+  afterAdd: (kind, id) => { if (!S.sel || S.sel.kind === 'adhoc') { S.sel = { kind, id }; renderSide(); draw(); } },
+  saveTemplate: () => { const t = C.clone(S.template); t.dimensions = 2; saveFile(`${t.id || 'template'}.template.json`, JSON.stringify(t, null, 2) + '\n'); },
+  loadTemplate: () => $('#fTpl').click(),
+  editAsText: () => { $('#tplText').value = C.tplToText(S.template); $('#tplErr').textContent = ''; $('#dTpl').showModal(); },
+});
+
 /* ---------- helpers ---------- */
 const { r6, fmt, dist } = C;
 const f2 = v => v.toFixed(2);
@@ -53,10 +63,23 @@ function undo(){
   const s = undoStack.pop(); if (!s){ toast('Nothing to undo'); return; }
   const o = JSON.parse(s); S.landmarks = o.l; S.curves = o.c; S.template = o.t;
   if (o.sc) S.specimen.image.scale = o.sc; else delete S.specimen.image.scale;
-  if (S.sel && S.sel.kind !== 'adhoc' && !(S.sel.kind === 'lm' ? (tLm(S.sel.id) || lmEntry(S.sel.id)) : tCurve(S.sel.id))) S.sel = null;
   changed();
 }
-function changed(){ C.recomputeCurves(S); renderSide(); draw(); autosave(); }
+function changed(){ fixSel(); C.recomputeCurves(S); renderSide(); draw(); autosave(); }
+/** Keep the selection pointing at something that still exists. */
+function fixSel(){
+  if (!S.sel || S.sel.kind === 'adhoc') return;
+  const ok = S.sel.kind === 'lm' ? (tLm(S.sel.id) || lmEntry(S.sel.id)) : tCurve(S.sel.id);
+  if (!ok) S.sel = C.nextTodo(S, null);
+}
+/** Run an edit; if it changed the document, record one undo step and redraw. Returns the edit's result. */
+function mutate(fn){
+  const before = snap();
+  const result = fn();
+  if (snap() !== before){ undoStack.push(before); if (undoStack.length > 150) undoStack.shift(); changed(); }
+  else tplEditor.requestRender();
+  return result;
+}
 
 /* ---------- placing ---------- */
 function handleClick(p){
@@ -322,6 +345,7 @@ function renderSide(){
 
   renderDetail();
   updateHint();
+  if (tplEditor.visible) tplEditor.requestRender();
 }
 function renderDetail(){
   const d = $('#detail');
@@ -618,9 +642,7 @@ $('#side').addEventListener('click', e => {
   else if (act === 'scale-manual'){ S.scaleManual = true; S.tool = 'place'; renderSide(); }
   else if (act === 'scale-manual-apply') applyManual();
   else if (act === 'scale-remove'){ pushUndo(); delete S.specimen.image.scale; changed(); }
-  else if (act === 'tpl-edit'){ $('#tplText').value = C.tplToText(S.template); $('#tplErr').textContent = ''; $('#dTpl').showModal(); }
-  else if (act === 'tpl-load') $('#fTpl').click();
-  else if (act === 'tpl-save'){ const t = C.clone(S.template); t.dimensions = 2; saveFile(`${t.id || 'template'}.template.json`, JSON.stringify(t, null, 2) + '\n'); }
+  else if (act === 'goto-template') selectTab($('#t-template'));
   else if (act === 'dismiss-warn'){ S.warn = null; renderSide(); }
 });
 $('#side').addEventListener('change', e => {
@@ -685,7 +707,7 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); undo(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === 'escape'){ if (S.tool !== 'place') cancelScale(); return; }
-  if (k === 'n' || e.key === 'Tab'){ e.preventDefault(); const n = nextTodo(); if (n){ S.sel = n; renderSide(); draw(); } else toast('Every template point is done'); return; }
+  if (k === 'n'){ e.preventDefault(); const n = nextTodo(); if (n){ S.sel = n; renderSide(); draw(); } else toast('Every template point is done'); return; }
   if (k === 'm'){ setStatus('missing'); return; }
   if (k === 'e'){ if (S.sel && S.sel.kind === 'lm'){ const ent = lmEntry(S.sel.id); setStatus(ent && ent.status === 'estimated' ? 'placed' : 'estimated'); } else setStatus('estimated'); return; }
   if (e.key === 'Delete'){ clearSel(); return; }
@@ -768,6 +790,25 @@ function loadSample(){
   setFields(); C.recomputeCurves(S); resize(); fit(); renderSide();
   c.toBlob(async b => { if (b && S.isSample){ S.specimen.image.sha256 = await C.sha256Hex(await b.arrayBuffer()); renderSide(); } }, 'image/png');
 }
+
+/* ---------- side panel tabs ---------- */
+const tabs = [...document.querySelectorAll('#side [role="tab"]')];
+function selectTab(tab){
+  for (const t of tabs){
+    const on = t === tab;
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+    $('#' + t.getAttribute('aria-controls')).hidden = !on;
+  }
+  if (tab.id === 't-template') tplEditor.render();
+}
+tabs.forEach(t => t.addEventListener('click', () => selectTab(t)));
+$('#side [role="tablist"]').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const i = tabs.indexOf(document.activeElement); if (i < 0) return;
+  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  selectTab(next); next.focus(); e.preventDefault();
+});
 
 /* ---------- boot ---------- */
 try { const op = localStorage.getItem('lmk2d:operator'); if (op) $('#opName').value = op; } catch {}

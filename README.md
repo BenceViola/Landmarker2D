@@ -9,16 +9,12 @@ It is the 2D companion of a 3D landmarking app that uses the same file format.
 Open the hosted version (GitHub Pages, once enabled), or download `landmarker2d.html` from the site or from a build and open it in any modern browser.
 
 1. **Open image** (JPG, PNG or WebP). The specimen ID is taken from the file name.
-2. **Template → Load…** to use your lab's `.template.json`, or **Edit** to write one:
-   ```
-   # id: cranium-lateral
-   # name: Cranium, lateral
-   # version: 1.0
-   LM01 | Nasion | Most anterior point of the frontonasal suture
-   LM02 | Porion L | pair=LM03
-   LM03 | Porion R | pair=LM02
-   curve C01 | Brow ridge | start=LM01 end=LM02 n=8 path=spline
-   ```
+2. Set up the template in the **Template** tab (it works like the one in the 3D app):
+   - name the template, add landmarks one at a time or paste a list, rename them, write where to place each one, set bilateral pairs and change the order;
+   - add curves: choose the landmarks they start and end on (or a closed loop), the number of semilandmarks, and straight or smooth lines between clicks;
+   - **Save template file** to share it, or **Open template file…** to use your lab's `.template.json`. **Edit as text…** shows the whole template as lines like `LM01 | Nasion | pair=LM02`, handy for pasting.
+
+   IDs (`LM01`, `C01`) lock once a landmark or curve has data; names can always change. Every edit can be undone.
 3. Click to place the selected landmark; the next one is selected automatically. For a curve, click along it in order: the ends snap to the `start`/`end` landmarks and `n` semilandmarks are spaced at equal arc length.
 4. **Measure scale bar** (two clicks plus the known length) to calibrate.
 5. **Save .lmk.json**, and **Export TPS** / **Export CSV** for analysis.
@@ -61,7 +57,8 @@ First time with the browser tests: `npx playwright install chromium`, or use an 
 ```
 index.html           page markup
 src/core.js          format logic, no DOM: curves, templates, .lmk.json read/write, TPS/CSV (window.LmkCore / require)
-src/app.js           UI: canvas, pointer and keyboard input, side panel, file handling
+src/app.js           UI: canvas, pointer and keyboard input, side panel tabs, file handling
+src/template-editor.js  the Template tab (modelled on Landmarker3D's js/template-editor.js)
 src/styles.css       styles (light and dark)
 tests/unit/          node:test suites for core.js
 tests/e2e/           Playwright tests driving the real page
