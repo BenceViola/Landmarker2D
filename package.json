@@ -1,0 +1,23 @@
+{
+  "name": "landmarker2d",
+  "version": "0.1.0",
+  "description": "Lightweight browser tool for placing 2D landmarks and curve semilandmarks on images. Saves landmark-json (.lmk.json), exports TPS and CSV.",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node scripts/build.mjs && playwright test",
+    "test:all": "npm test && npm run test:e2e",
+    "build": "node scripts/build.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BenceViola/landmarker2D.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

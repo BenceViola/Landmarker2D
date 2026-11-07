@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2D Landmarker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Place 2D landmarks and curve semilandmarks on images; saves landmark-json, exports TPS and CSV.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23FFC23D' stroke-width='3'/%3E%3Cpath d='M16 2v8M16 22v8M2 16h8M22 16h8' stroke='%232346C4' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><h1>2D Landmarker</h1><span class="fmt">landmark-json 0.2 · image pixels</span></div>
+    <div class="grp">
+      <button class="btn" id="bOpenImg" type="button">Open image</button>
+      <button class="btn" id="bOpenDoc" type="button">Open .lmk.json</button>
+    </div>
+    <div class="grp">
+      <button class="btn primary" id="bSave" type="button">Save .lmk.json</button>
+      <button class="btn" id="bTps" type="button">Export TPS</button>
+      <button class="btn" id="bCsv" type="button">Export CSV</button>
+    </div>
+    <div class="grp">
+      <button class="btn" id="bUndo" type="button" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn on" id="bLabels" type="button" title="Show labels (L)">Labels</button>
+      <button class="btn on" id="bLoupe" type="button" title="Magnifier near the cursor">Loupe</button>
+    </div>
+    <input type="file" id="fImg" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden>
+    <input type="file" id="fDoc" accept=".json,application/json" hidden>
+    <input type="file" id="fTpl" accept=".json,application/json" hidden>
+  </header>
+
+  <main class="work">
+    <section class="stage" id="stage" aria-label="Image">
+      <canvas id="cv"></canvas>
+      <div class="sample-tag" id="sampleTag" hidden><b>Sample image.</b> Open your own image to start.</div>
+      <div class="hint" id="hint"></div>
+      <div class="zoom">
+        <button type="button" id="zOut" title="Zoom out (−)">−</button>
+        <span id="zPct">100%</span>
+        <button type="button" id="zIn" title="Zoom in (+)">+</button>
+        <button type="button" id="zFit" title="Fit (F)">Fit</button>
+      </div>
+      <div class="drop" id="drop" hidden>Drop an image, .lmk.json or template</div>
+    </section>
+
+    <aside class="side" id="side">
+      <div class="sec" id="warnSec" hidden></div>
+      <div class="sec">
+        <div class="eyebrow">Specimen</div>
+        <div class="field"><label for="spId">ID</label><input type="text" id="spId" spellcheck="false"></div>
+        <div class="field"><label for="spNotes">Notes</label><input type="text" id="spNotes"></div>
+        <div class="field"><label for="opName">Operator</label><input type="text" id="opName" placeholder="e.g. student01" spellcheck="false"></div>
+        <div class="meta" id="imgMeta"></div>
+        <div class="scalebox" id="scaleBox"></div>
+      </div>
+      <div class="sec">
+        <div class="eyebrow">Template <span class="count" id="tplCount"></span></div>
+        <div><div class="tplname" id="tplName"></div><div class="tplsub" id="tplSub"></div></div>
+        <div class="prog"><i id="tplProg" style="width:0"></i></div>
+        <div class="inline">
+          <button class="btn sm" type="button" data-act="tpl-edit">Edit</button>
+          <button class="btn sm" type="button" data-act="tpl-load">Load…</button>
+          <button class="btn sm" type="button" data-act="tpl-save">Save template</button>
+          <button class="btn sm" type="button" data-act="adhoc" title="Place a point that is not in the template">+ Ad hoc point</button>
+        </div>
+        <div class="list" id="list"></div>
+      </div>
+      <div class="sec" id="detail"></div>
+      <div class="sec">
+        <div class="eyebrow">Keys</div>
+        <div class="keys">
+          Click to place · drag a point to move · drag empty space to pan · wheel to zoom<br>
+          <kbd>N</kbd> next to-do · <kbd>E</kbd> estimated · <kbd>M</kbd> missing · <kbd>Del</kbd> clear<br>
+          <kbd>⌫</kbd> remove last curve point · <kbd>F</kbd> fit · <kbd>L</kbd> labels · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="status">
+    <span id="sPos">x — y —</span>
+    <span id="sUnits"></span>
+    <span>origin top-left · y down · pixel centres at .5</span>
+    <span id="sSave"></span>
+  </footer>
+</div>
+
+<dialog id="dTpl">
+  <form class="dlg" id="tplForm" method="dialog">
+    <h2>Edit template</h2>
+    <p>One landmark per line: <code>LM01 | Name | description | pair=LM02</code>. Curves: <code>curve C01 | Name | start=LM02 end=LM03 n=10 path=spline</code> (add <code>closed</code> for loops; path is <code>polyline</code> or <code>spline</code>). Lines starting with <code>#</code> set the id, name and version. List order is export order. Ids never change once data exists; names can.</p>
+    <textarea id="tplText" spellcheck="false" aria-label="Template text"></textarea>
+    <div class="err" id="tplErr"></div>
+    <div class="acts">
+      <button class="btn" type="button" id="tplCancel">Cancel</button>
+      <button class="btn primary" type="submit">Apply template</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dText">
+  <div class="dlg">
+    <h2 id="txtTitle">File</h2>
+    <p>This view can't save files directly. Copy the text and save it under this name.</p>
+    <textarea id="txtBody" readonly spellcheck="false" aria-label="File contents"></textarea>
+    <div class="acts">
+      <button class="btn" type="button" id="txtCopy">Copy</button>
+      <button class="btn primary" type="button" id="txtClose">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+<script src="src/core.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
