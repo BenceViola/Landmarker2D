@@ -51,6 +51,14 @@
   const lmEntry = (s, id) => s.landmarks.find(l => l.id === id);
   const curveEntry = (s, id) => s.curves.find(c => c.id === id);
   const scaleOf = s => (s.specimen.image && s.specimen.image.scale) || null;
+  /**
+   * Every specimen that shares this state's template. A state that belongs to
+   * a specimen set has a non-enumerable `_set` ({ template, specimens }); a
+   * lone state is its own only member.
+   */
+  const members = s => (s._set ? s._set.specimens : [s]);
+  const anyLm = (s, id) => members(s).some(m => m.landmarks.some(e => e.id === id));
+  const anyCurve = (s, id) => members(s).some(m => m.curves.some(c => c.id === id));
 
   /* ---------- items and progress ---------- */
   function items(s) {
@@ -338,8 +346,10 @@
   /** Use a new template: landmarks it no longer lists become ad hoc points; curves it drops are removed. */
   function applyTemplate(s, t) {
     s.template = t;
-    for (const e of s.landmarks) if (e.template_id && !tLm(s, e.template_id)) { e.template_id = null; e.label = e.label || e.id; }
-    s.curves = s.curves.filter(c => tCurve(s, c.template_id));
+    for (const m of members(s)) {
+      for (const e of m.landmarks) if (e.template_id && !tLm(s, e.template_id)) { e.template_id = null; e.label = e.label || e.id; }
+      m.curves = m.curves.filter(c => tCurve(s, c.template_id));
+    }
   }
 
   /* ---------- template editing ----------
@@ -349,12 +359,13 @@
   const TEMPLATE_FIELDS = ['id', 'name', 'version', 'description', 'author'];
   const MAX_CURVE_POINTS = 500;
 
-  const idInUse = (s, id) => !!(tLm(s, id) || tCurve(s, id) || lmEntry(s, id) || curveEntry(s, id));
+  const idInUse = (s, id) => !!(tLm(s, id) || tCurve(s, id) || anyLm(s, id) || anyCurve(s, id));
   /** Next free id of the form LM01, LM02… or C01, C02… */
   function nextId(s, prefix) {
     const re = new RegExp('^' + prefix + '(\\d+)$');
     let n = 0;
-    for (const x of [...(s.template.landmarks || []), ...(s.template.curves || []), ...s.landmarks, ...s.curves]) {
+    const placed = members(s).flatMap(m => [...m.landmarks, ...m.curves]);
+    for (const x of [...(s.template.landmarks || []), ...(s.template.curves || []), ...placed]) {
       const m = re.exec(x.id);
       if (m) n = Math.max(n, Number(m[1]));
     }
@@ -407,7 +418,7 @@
     const def = tLm(s, id);
     if (!def) return null;
     const newId = 'id' in patch ? String(patch.id).trim() : id;
-    const err = checkNewId(s, id, newId, !!lmEntry(s, id));
+    const err = checkNewId(s, id, newId, anyLm(s, id));
     if (err) return err;
     const name = 'name' in patch ? String(patch.name).trim() : def.name;
     if (!name) return 'Every landmark needs a name.';
@@ -431,7 +442,7 @@
     const i = (t.landmarks || []).findIndex(d => d.id === id);
     if (i < 0) return;
     t.landmarks.splice(i, 1);
-    s.landmarks = s.landmarks.filter(e => e.template_id !== id && e.id !== id);
+    for (const m of members(s)) m.landmarks = m.landmarks.filter(e => e.template_id !== id && e.id !== id);
     for (const d of t.landmarks) if (d.bilateral_pair === id) delete d.bilateral_pair;
     for (const c of t.curves || []) { if (c.start === id) delete c.start; if (c.end === id) delete c.end; }
     dropFromOrder(t, id);
@@ -478,7 +489,7 @@
     const c = tCurve(s, id);
     if (!c) return null;
     const newId = 'id' in patch ? String(patch.id).trim() : id;
-    const err = checkNewId(s, id, newId, !!curveEntry(s, id));
+    const err = checkNewId(s, id, newId, anyCurve(s, id));
     if (err) return err;
     const name = 'name' in patch ? String(patch.name).trim() : c.name;
     if (!name) return 'Every curve needs a name.';
@@ -519,15 +530,23 @@
     const i = (t.curves || []).findIndex(c => c.id === id);
     if (i < 0) return;
     t.curves.splice(i, 1);
-    s.curves = s.curves.filter(c => c.template_id !== id && c.id !== id);
+    for (const m of members(s)) m.curves = m.curves.filter(c => c.template_id !== id && c.id !== id);
     dropFromOrder(t, id);
   }
 
   /** Start over with an empty template: removes every placed point (the app keeps this as one undo step). */
   function newTemplate(s) {
     s.template = emptyTemplate();
-    s.landmarks = [];
-    s.curves = [];
+    for (const m of members(s)) { m.landmarks = []; m.curves = []; }
+  }
+  /** How many specimens have data for a landmark ('lm') or curve ('curve'); used in delete warnings. */
+  function specimensWith(s, kind, id) {
+    return members(s).filter(m => (kind === 'curve' ? m.curves : m.landmarks).some(x => x.id === id)).length;
+  }
+  /** Placing progress of one specimen: items done (placed, estimated or missing) out of all template items. */
+  function progress(s) {
+    const a = items(s);
+    return { done: a.filter(it => isDone(s, it)).length, total: a.length };
   }
 
   /* ---------- documents ---------- */
@@ -632,27 +651,233 @@
   }
   const notDoneCount = rows => rows.filter(r => r.status === 'not_done').length;
 
-  /** tpsDig-style TPS: y flipped to point up, missing written as -999 -999. */
-  function toTPS(s, specimenId) {
-    const rows = exportRows(s), H = s.specimen.image.height, sc = scaleOf(s);
-    const L = [`LM=${rows.length}`];
-    for (const r of rows) L.push(r.pos ? `${fmt(r.pos[0])} ${fmt(H - r.pos[1])}` : '-999 -999');
-    L.push(`IMAGE=${s.specimen.image.file}`);
-    L.push(`ID=${specimenId || s.specimen.id}`);
-    if (sc) L.push(`SCALE=${fmt(sc.value)}`);
+  /* ---------- combined exports ---------- */
+  const replicateOf = st => (Number.isInteger(st.specimen.replicate) && st.specimen.replicate > 0 ? st.specimen.replicate : 1);
+  const operatorOf = st => String((st.provenance && st.provenance.operator) || '').trim();
+  const safeName = v => String(v).trim().replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[_.]+|[_.]+$/g, '');
+
+  /**
+   * IDs for a combined export (spec: Replicates). Every ID gets
+   * _<operator> when any specimen comes from more than one operator, and
+   * _r<n> when any specimen has more than one replicate, so IDs stay unique
+   * and parallel. Otherwise the ID is the specimen ID alone.
+   */
+  function exportIds(states) {
+    const ops = new Map(), reps = new Map();
+    for (const st of states) {
+      const id = st.specimen.id;
+      if (!ops.has(id)) { ops.set(id, new Set()); reps.set(id, new Set()); }
+      ops.get(id).add(operatorOf(st));
+      reps.get(id).add(replicateOf(st));
+    }
+    const byOp = [...ops.values()].some(x => x.size > 1);
+    const byRep = [...reps.values()].some(x => x.size > 1);
+    return states.map(st => st.specimen.id
+      + (byOp ? '_' + (safeName(operatorOf(st)) || 'unknown') : '')
+      + (byRep ? '_r' + replicateOf(st) : ''));
+  }
+  const asList = v => (Array.isArray(v) ? v : [v]);
+
+  /** tpsDig-style TPS, one block per specimen: y flipped to point up, missing written as -999 -999. */
+  function toTPS(states, ids) {
+    states = asList(states);
+    ids = ids ? asList(ids) : exportIds(states);
+    const L = [];
+    states.forEach((st, i) => {
+      const rows = exportRows(st), H = st.specimen.image.height, sc = scaleOf(st);
+      L.push(`LM=${rows.length}`);
+      for (const r of rows) L.push(r.pos ? `${fmt(r.pos[0])} ${fmt(H - r.pos[1])}` : '-999 -999');
+      L.push(`IMAGE=${st.specimen.image.file}`);
+      L.push(`ID=${ids[i] || st.specimen.id}`);
+      if (sc) L.push(`SCALE=${fmt(sc.value)}`);
+    });
     return L.join('\n') + '\n';
   }
-  /** CSV in image orientation (y down), in scale units when a scale is set, else pixels. */
-  function toCSV(s, specimenId) {
-    const rows = exportRows(s), sc = scaleOf(s), units = sc ? sc.units : 'px', k = sc ? sc.value : 1;
-    const id = specimenId || s.specimen.id;
+  const CSV_HEADER = 'tps_id,specimen_id,replicate,operator,image,point,template_id,label,type,curve,index,x,y,units,status';
+  /** CSV in image orientation (y down), in scale units when a specimen has a scale, else pixels. One row per point per specimen. */
+  function toCSV(states, ids) {
+    states = asList(states);
+    ids = ids ? asList(ids) : exportIds(states);
     const q = v => { const x = String(v == null ? '' : v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
-    const L = ['specimen_id,image,point,template_id,label,type,curve,index,x,y,units,status'];
-    for (const r of rows) {
-      L.push([id, s.specimen.image.file, r.point, r.template_id, r.label, r.type, r.curve, r.index,
-        r.pos ? fmt(r.pos[0] * k) : 'NA', r.pos ? fmt(r.pos[1] * k) : 'NA', units, r.status].map(q).join(','));
-    }
+    const L = [CSV_HEADER];
+    states.forEach((st, i) => {
+      const sc = scaleOf(st), units = sc ? sc.units : 'px', k = sc ? sc.value : 1;
+      for (const r of exportRows(st)) {
+        L.push([ids[i] || st.specimen.id, st.specimen.id, replicateOf(st), operatorOf(st), st.specimen.image.file,
+          r.point, r.template_id, r.label, r.type, r.curve, r.index,
+          r.pos ? fmt(r.pos[0] * k) : 'NA', r.pos ? fmt(r.pos[1] * k) : 'NA', units, r.status].map(q).join(','));
+      }
+    });
     return L.join('\n') + '\n';
+  }
+
+  /** null when two templates give the same export rows, otherwise why they differ. */
+  function templateDifference(a, b) {
+    const sig = t => JSON.stringify({
+      lms: (t.landmarks || []).map(l => l.id),
+      curves: (t.curves || []).map(c => [c.id, c.n_points != null ? c.n_points : 10]),
+      order: Array.isArray(t.export_order) && t.export_order.length ? t.export_order : null,
+    });
+    if ((a.id || '') !== (b.id || '')) return `it uses the template “${b.id}”, not “${a.id}”`;
+    if (sig(a) !== sig(b)) return `its version of the template “${b.id}” has different landmarks or curves`;
+    return null;
+  }
+
+  /* ---------- zip (store-only writer; reader also takes deflated files) ---------- */
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  const utf8 = v => (typeof v === 'string' ? new TextEncoder().encode(v) : v);
+
+  /** files: [{ name, data: string | Uint8Array }], date: Date → zip archive bytes (no compression). */
+  function zipFiles(files, date) {
+    date = date || new Date();
+    const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
+    const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = utf8(f.name), data = utf8(f.data), crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, dosTime, 2], [12, dosDate, 2],
+        [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, name.length, 2], [28, 0, 2]]
+        .forEach(([o, v, n]) => (n === 4 ? local.setUint32(o, v, true) : local.setUint16(o, v, true)));
+      const cen = new DataView(new ArrayBuffer(46));
+      [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, dosTime, 2], [14, dosDate, 2],
+        [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, name.length, 2], [30, 0, 2], [32, 0, 2],
+        [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]]
+        .forEach(([o, v, n]) => (n === 4 ? cen.setUint32(o, v, true) : cen.setUint16(o, v, true)));
+      parts.push(new Uint8Array(local.buffer), name, data);
+      central.push(new Uint8Array(cen.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const cenSize = central.reduce((n, b) => n + b.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, cenSize, 4], [16, offset, 4], [20, 0, 2]]
+      .forEach(([o, v, n]) => (n === 4 ? end.setUint32(o, v, true) : end.setUint16(o, v, true)));
+    const all = [...parts, ...central, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(all.reduce((n, b) => n + b.length, 0));
+    let p = 0; for (const b of all) { out.set(b, p); p += b.length; }
+    return out;
+  }
+
+  async function inflateRaw(bytes) {
+    if (typeof DecompressionStream !== 'function') throw new Error('This browser can’t unpack compressed zip files. Update it, or unzip the file and open the .lmk.json files instead.');
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  /** Zip bytes → [{ name, data: Uint8Array }]. Skips folders and macOS metadata. */
+  async function unzipFiles(bytes) {
+    bytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let e = -1;
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) if (v.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) throw new Error('This is not a zip file, or it is damaged.');
+    const count = v.getUint16(e + 10, true);
+    let p = v.getUint32(e + 16, true);
+    const out = [];
+    const dec = new TextDecoder();
+    for (let i = 0; i < count; i++) {
+      if (v.getUint32(p, true) !== 0x02014b50) throw new Error('The zip file is damaged.');
+      const flags = v.getUint16(p + 8, true), method = v.getUint16(p + 10, true);
+      const csize = v.getUint32(p + 20, true), nlen = v.getUint16(p + 28, true);
+      const xlen = v.getUint16(p + 30, true), clen = v.getUint16(p + 32, true), loc = v.getUint32(p + 42, true);
+      const name = dec.decode(bytes.subarray(p + 46, p + 46 + nlen));
+      p += 46 + nlen + xlen + clen;
+      if (name.endsWith('/') || /(^|\/)(__MACOSX\/|\._)/.test(name)) continue;
+      if (flags & 1) throw new Error(`“${name}” in the zip is password-protected.`);
+      const start = loc + 30 + v.getUint16(loc + 26, true) + v.getUint16(loc + 28, true);
+      const raw = bytes.subarray(start, start + csize);
+      let data;
+      if (method === 0) data = raw.slice();
+      else if (method === 8) data = await inflateRaw(raw);
+      else throw new Error(`“${name}” in the zip uses a compression this app can’t read.`);
+      out.push({ name, data });
+    }
+    return out;
+  }
+
+  /* ---------- specimen sets ---------- */
+  /** A set of specimens sharing one template. */
+  function newSet(template) { return { template: template || emptyTemplate(), specimens: [] }; }
+  /** Add a specimen state to a set; its `template` becomes the set's (shared) template. */
+  function joinSet(set, st) {
+    delete st.template;
+    Object.defineProperty(st, 'template', { get: () => set.template, set: v => { set.template = v; }, enumerable: true, configurable: true });
+    Object.defineProperty(st, '_set', { value: set, enumerable: false, configurable: true });
+    set.specimens.push(st);
+    return st;
+  }
+  /** The specimen in the set with the same image (by checksum), if any. */
+  const findBySha = (set, sha) => (sha ? set.specimens.find(st => st.specimen.image && st.specimen.image.sha256 === sha) : undefined);
+
+  /* ---------- hand-in and combining ---------- */
+  /** File name for a specimen's .lmk.json: <id>.lmk.json, or <id>_r<n>.lmk.json for later replicates. */
+  const docFileName = st => `${safeName(st.specimen.id) || 'specimen'}${replicateOf(st) > 1 ? '_r' + replicateOf(st) : ''}.lmk.json`;
+
+  /** Files for a student's hand-in zip: one .lmk.json per specimen plus combined TPS and CSV. opts: { operator, now }. */
+  function handInFiles(states, opts) {
+    opts = opts || {};
+    const base = `${safeName(opts.operator) || 'landmarks'}_landmarks`;
+    const used = new Set(), files = [];
+    const docs = states.map(st => buildDoc(st, { operator: opts.operator, now: opts.now }));
+    docs.forEach((d, i) => {
+      let name = docFileName(states[i]);
+      for (let k = 2; used.has(name); k++) name = docFileName(states[i]).replace(/\.lmk\.json$/, `_${k}.lmk.json`);
+      used.add(name);
+      files.push({ name, data: JSON.stringify(d, null, 2) + '\n' });
+    });
+    const withOp = docs.map(d => ({ specimen: d.specimen, template: d.template, landmarks: d.landmarks, curves: d.curves || [], provenance: d.provenance }));
+    files.push({ name: `${base}.tps`, data: toTPS(withOp) });
+    files.push({ name: `${base}.csv`, data: toCSV(withOp) });
+    return files;
+  }
+
+  /**
+   * Combine hand-ins from several students. entries: [{ source, name, doc }]
+   * (source = the zip or file it came from). Files with a template that
+   * differs from the first accepted file are refused; an exact repeat
+   * (same specimen, operator and replicate) is skipped.
+   */
+  function combineEntries(entries) {
+    const states = [], refused = [], skipped = [];
+    let template = null;
+    const seen = new Map();
+    for (const en of entries) {
+      let st;
+      try { st = parseDoc(en.doc, en.name); } catch (err) { refused.push({ source: en.source, name: en.name, reason: err.message }); continue; }
+      if (template) {
+        const diff = templateDifference(template, st.template);
+        if (diff) { refused.push({ source: en.source, name: en.name, reason: `Not combined: ${diff}.` }); continue; }
+      } else template = st.template;
+      const key = JSON.stringify([st.specimen.id, operatorOf(st), replicateOf(st)]);
+      if (seen.has(key)) { skipped.push({ source: en.source, name: en.name, reason: `Same specimen, operator and replicate as ${seen.get(key)}.` }); continue; }
+      seen.set(key, en.name);
+      states.push(st);
+    }
+    const byOperator = new Map();
+    for (const st of states) {
+      const op = operatorOf(st) || '(no name)';
+      const row = byOperator.get(op) || { operator: op, specimens: 0, complete: 0, ids: [] };
+      const pr = progress(st);
+      row.specimens++; if (pr.done === pr.total) row.complete++;
+      row.ids.push(st.specimen.id + (replicateOf(st) > 1 ? '_r' + replicateOf(st) : ''));
+      byOperator.set(op, row);
+    }
+    const opsPerSpecimen = new Map();
+    for (const st of states) {
+      const set = opsPerSpecimen.get(st.specimen.id) || new Set();
+      set.add(operatorOf(st)); opsPerSpecimen.set(st.specimen.id, set);
+    }
+    const shared = [...opsPerSpecimen].filter(([, set]) => set.size > 1).map(([id, set]) => ({ id, operators: set.size }));
+    return { states, refused, skipped, template, operators: [...byOperator.values()], shared, ids: exportIds(states) };
   }
 
   return {
@@ -667,6 +892,9 @@
     ID_RE, MAX_CURVE_POINTS, nextId, setTemplateField, addDefs, updateDef, removeDef, moveItem, setPair,
     addCurve, updateCurve, removeCurve, newTemplate,
     sortedEntries, buildDoc, parseDoc, sniffJson,
-    exportRows, notDoneCount, toTPS, toCSV,
+    exportRows, notDoneCount, toTPS, toCSV, CSV_HEADER, exportIds, replicateOf, operatorOf, safeName,
+    members, specimensWith, progress, templateDifference,
+    newSet, joinSet, findBySha,
+    crc32, zipFiles, unzipFiles, docFileName, handInFiles, combineEntries,
   };
 });

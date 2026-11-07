@@ -127,7 +127,7 @@ class TemplateEditor {
 
       <div class="tpl-danger">
         ${this.confirming === '*new*'
-          ? `<p class="confirm-text">Start an empty template? This removes all ${lms.length} landmarks${curves.length ? ` and ${curves.length} curve${curves.length === 1 ? '' : 's'}` : ''} and every placed point. You can undo it.</p>
+          ? `<p class="confirm-text">Start an empty template? This removes all ${lms.length} landmarks${curves.length ? ` and ${curves.length} curve${curves.length === 1 ? '' : 's'}` : ''} and every placed point${S._set && S._set.specimens.length > 1 ? ` on all ${S._set.specimens.length} specimens` : ''}. You can undo it.</p>
              <div class="confirm-actions">
                <button type="button" class="btn sm danger" data-act="new-yes">Start empty template</button>
                <button type="button" class="btn sm" data-act="cancel">Cancel</button>
@@ -154,9 +154,13 @@ class TemplateEditor {
     </div>`;
   }
 
-  _confirm(kind, d, hasData) {
+  _confirm(kind, d) {
     if (this.confirming !== `${kind}:${d.id}`) return '';
-    const what = kind === 'curve' ? (hasData ? ' and the points clicked on it' : '') : (hasData ? ' and its placed point' : '');
+    const { S, C } = this.ctx;
+    const n = C.specimensWith(S, kind, d.id);
+    const what = !n ? ''
+      : kind === 'curve' ? ` and the points clicked on it${n > 1 ? ` on ${n} specimens` : ''}`
+      : n > 1 ? ` and its placed points on ${n} specimens` : ' and its placed point';
     return `<div class="tpl-confirm">
       <p class="confirm-text">Delete ${esc(d.id)} ${esc(d.name)}${what}?</p>
       <div class="confirm-actions">
@@ -168,7 +172,7 @@ class TemplateEditor {
 
   _lmRow(d, i, lms) {
     const { S, C } = this.ctx;
-    const hasData = !!C.lmEntry(S, d.id);
+    const hasData = C.specimensWith(S, 'lm', d.id) > 0;
     const k = key(d.id);
     const err = this.errors.get('lm:' + d.id);
     const isSel = S.sel && S.sel.kind === 'lm' && S.sel.id === d.id;
@@ -186,7 +190,7 @@ class TemplateEditor {
           ${this._btns('lm', d, i, lms.length)}
         </div>
         ${err ? `<p class="tpl-err" role="alert">${esc(err)}</p>` : ''}
-        ${this._confirm('lm', d, hasData)}
+        ${this._confirm('lm', d)}
         <details class="tpl-more"${this.open.has('lm:' + d.id) ? ' open' : ''}>
           <summary>${d.description ? esc(d.description) : 'Add placement instructions'}${d.bilateral_pair ? ` · pair ${esc(d.bilateral_pair)}` : ''}</summary>
           <label class="field-stack">Where to place it
@@ -203,7 +207,7 @@ class TemplateEditor {
 
   _curveRow(c, i, curves, lms) {
     const { S, C } = this.ctx;
-    const hasData = !!C.curveEntry(S, c.id);
+    const hasData = C.specimensWith(S, 'curve', c.id) > 0;
     const k = key(c.id);
     const err = this.errors.get('curve:' + c.id);
     const isSel = S.sel && S.sel.kind === 'curve' && S.sel.id === c.id;
@@ -223,7 +227,7 @@ class TemplateEditor {
           ${this._btns('curve', c, i, curves.length)}
         </div>
         ${err ? `<p class="tpl-err" role="alert">${esc(err)}</p>` : ''}
-        ${this._confirm('curve', c, hasData)}
+        ${this._confirm('curve', c)}
         <details class="tpl-more"${this.open.has('curve:' + c.id) ? ' open' : ''}>
           <summary>${esc(summary)}</summary>
           <div class="tpl-grid">

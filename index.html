@@ -17,25 +17,27 @@
   <header class="bar">
     <div class="brand"><h1>2D Landmarker</h1><span class="fmt">landmark-json 0.2 · image pixels</span></div>
     <div class="grp">
-      <button class="btn" id="bOpenImg" type="button">Open image</button>
-      <button class="btn" id="bOpenDoc" type="button">Open .lmk.json</button>
+      <button class="btn" id="bOpenImg" type="button" title="Open one or more images; each becomes a specimen">Open images</button>
+      <button class="btn" id="bOpenDoc" type="button" title="Open .lmk.json files or a hand-in zip">Open files</button>
     </div>
     <div class="grp">
-      <button class="btn primary" id="bSave" type="button">Save .lmk.json</button>
-      <button class="btn" id="bTps" type="button">Export TPS</button>
-      <button class="btn" id="bCsv" type="button">Export CSV</button>
+      <button class="btn primary" id="bHandin" type="button" title="One zip with every specimen's landmark file, plus TPS and CSV">Download hand-in</button>
+      <button class="btn" id="bSave" type="button" title="Save this specimen's landmark file">Save .lmk.json</button>
+      <button class="btn" id="bTps" type="button" title="All specimens in one TPS file">Export TPS</button>
+      <button class="btn" id="bCsv" type="button" title="All specimens in one CSV file">Export CSV</button>
     </div>
     <div class="grp">
       <button class="btn" id="bUndo" type="button" title="Undo (Ctrl+Z)">Undo</button>
       <button class="btn on" id="bLabels" type="button" title="Show labels (L)">Labels</button>
       <button class="btn on" id="bLoupe" type="button" title="Magnifier near the cursor">Loupe</button>
     </div>
-    <input type="file" id="fImg" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden>
-    <input type="file" id="fDoc" accept=".json,application/json" hidden>
+    <input type="file" id="fImg" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
+    <input type="file" id="fDoc" accept=".json,.zip,application/json,application/zip" multiple hidden>
     <input type="file" id="fTpl" accept=".json,application/json" hidden>
   </header>
 
   <main class="work">
+    <div class="viewer">
     <section class="stage" id="stage" aria-label="Image">
       <canvas id="cv"></canvas>
       <div class="sample-tag" id="sampleTag" hidden><b>Sample image.</b> Open your own image to start.</div>
@@ -46,8 +48,10 @@
         <button type="button" id="zIn" title="Zoom in (+)">+</button>
         <button type="button" id="zFit" title="Fit (F)">Fit</button>
       </div>
-      <div class="drop" id="drop" hidden>Drop an image, .lmk.json or template</div>
+      <div class="drop" id="drop" hidden>Drop images, .lmk.json files, a hand-in zip or a template</div>
     </section>
+    <div class="strip" id="strip" role="group" aria-label="Specimens ([ and ] to switch)"></div>
+    </div>
 
     <aside class="side" id="side">
       <div class="sec" id="warnSec" hidden></div>
@@ -101,11 +105,18 @@
           <div class="eyebrow">Scale</div>
           <div class="scalebox" id="scaleBox"></div>
         </div>
+        <div class="sec" id="spActions"></div>
+        <div class="sec">
+          <div class="eyebrow">For instructors</div>
+          <p class="hint">Combine the zips your students handed in into one TPS and CSV file. Everything stays on this computer.</p>
+          <div class="inline"><button class="btn sm" type="button" data-act="combine">Combine hand-ins…</button></div>
+        </div>
       </div>
     </aside>
   </main>
 
   <footer class="status">
+    <span id="sSpec"></span>
     <span id="sPos">x — y —</span>
     <span id="sUnits"></span>
     <span>origin top-left · y down · pixel centres at .5</span>
@@ -134,6 +145,37 @@
     <div class="acts">
       <button class="btn" type="button" id="txtCopy">Copy</button>
       <button class="btn primary" type="button" id="txtClose">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dHandin" aria-labelledby="hiTitle">
+  <form class="dlg" id="handinForm" method="dialog">
+    <h2 id="hiTitle">Download hand-in</h2>
+    <p>One zip file with a landmark file for each specimen, plus all of them combined as TPS and CSV. Hand in this zip.</p>
+    <label class="field-stack">Your name
+      <input type="text" id="hiName" autocomplete="name" spellcheck="false">
+    </label>
+    <div id="hiSummary"></div>
+    <div class="err" id="hiErr" role="alert"></div>
+    <div class="acts">
+      <button class="btn" type="button" id="hiCancel">Cancel</button>
+      <button class="btn primary" type="submit">Download zip</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dCombine" aria-labelledby="cbTitle">
+  <div class="dlg">
+    <h2 id="cbTitle">Combine hand-ins</h2>
+    <p>Choose the zips (or .lmk.json files) your students handed in. They are combined into one TPS and one CSV file. Nothing is uploaded, and the specimens open in the app are not changed.</p>
+    <div class="inline"><button class="btn" type="button" id="cbChoose">Choose files…</button></div>
+    <input type="file" id="fCombine" accept=".zip,.json,application/zip,application/json" multiple hidden>
+    <div id="cbResult" aria-live="polite"></div>
+    <div class="acts">
+      <button class="btn" type="button" id="cbTps" disabled>Download TPS</button>
+      <button class="btn" type="button" id="cbCsv" disabled>Download CSV</button>
+      <button class="btn primary" type="button" id="cbClose">Close</button>
     </div>
   </div>
 </dialog>

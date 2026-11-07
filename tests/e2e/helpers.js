@@ -50,6 +50,12 @@ async function download(page, locator) {
   return { name: dl.suggestedFilename(), text: fs.readFileSync(path, 'utf8') };
 }
 
+/** Click a button and return the downloaded file's name and bytes. */
+async function downloadBytes(page, locator) {
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.locator(locator).click()]);
+  return { name: dl.suggestedFilename(), bytes: new Uint8Array(fs.readFileSync(await dl.path())) };
+}
+
 /** Write a test PNG into the test's output folder; returns its path and sha256. */
 function pngFile(testInfo, name, w, h, seed = 0) {
   const buf = makePng(w, h, seed);
@@ -72,4 +78,4 @@ async function setTemplate(page, text) {
 
 const row = (page, id) => page.locator(`.row[data-id="${id}"]`);
 
-module.exports = { openTab, openApp, imgToPage, clickImage, viewScale, getState, download, pngFile, setTemplate, row };
+module.exports = { downloadBytes, openTab, openApp, imgToPage, clickImage, viewScale, getState, download, pngFile, setTemplate, row };

@@ -75,17 +75,17 @@ test('CSV is in pixels without a scale, y down, NA for missing', () => {
   const s = filled();
   C.setStatus(s, { kind: 'lm', id: 'LM01' }, 'missing');
   const lines = C.toCSV(s).trim().split('\n');
-  assert.equal(lines[0], 'specimen_id,image,point,template_id,label,type,curve,index,x,y,units,status');
-  assert.equal(lines[1], 'SPEC_01,spec01.jpg,LM01,LM01,First,landmark,,,NA,NA,px,missing');
-  assert.equal(lines[2], 'SPEC_01,spec01.jpg,LM02,LM02,Second,landmark,,,100,100,px,placed');
-  assert.equal(lines[4], 'SPEC_01,spec01.jpg,C01_01,C01,Edge,curve,C01,1,200,100,px,placed');
+  assert.equal(lines[0], 'tps_id,specimen_id,replicate,operator,image,point,template_id,label,type,curve,index,x,y,units,status');
+  assert.equal(lines[1], 'SPEC_01,SPEC_01,1,,spec01.jpg,LM01,LM01,First,landmark,,,NA,NA,px,missing');
+  assert.equal(lines[2], 'SPEC_01,SPEC_01,1,,spec01.jpg,LM02,LM02,Second,landmark,,,100,100,px,placed');
+  assert.equal(lines[4], 'SPEC_01,SPEC_01,1,,spec01.jpg,C01_01,C01,Edge,curve,C01,1,200,100,px,placed');
 });
 
 test('CSV is in scale units when calibrated', () => {
   const s = filled();
   s.specimen.image.scale = C.scaleFromBar([[0, 0], [400, 0]], 10, 'mm');
   const lines = C.toCSV(s).trim().split('\n');
-  assert.equal(lines[2], 'SPEC_01,spec01.jpg,LM02,LM02,Second,landmark,,,2.5,2.5,mm,placed');
+  assert.equal(lines[2], 'SPEC_01,SPEC_01,1,,spec01.jpg,LM02,LM02,Second,landmark,,,2.5,2.5,mm,placed');
 });
 
 test('CSV keeps the estimated flag', () => {

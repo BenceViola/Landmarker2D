@@ -69,7 +69,7 @@ test('TPS and CSV exports', async ({ page }, testInfo) => {
   expect(csv.name).toBe('spec_A.csv');
   const rows = csv.text.trim().split('\n');
   expect(rows).toHaveLength(7);
-  expect(rows[1]).toMatch(/^spec_A,spec_A\.png,LM01,LM01,Left corner,landmark,,,[\d.]+,[\d.]+,px,placed$/);
+  expect(rows[1]).toMatch(/^spec_A,spec_A,1,,spec_A\.png,LM01,LM01,Left corner,landmark,,,[\d.]+,[\d.]+,px,placed$/);
   expect(rows[3]).toMatch(/,C01_01,C01,Top edge,curve,C01,1,/);
 });
 

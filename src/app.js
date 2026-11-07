@@ -11,15 +11,56 @@ const COL = { lm:'#FFC23D', sel:'#FF4FB0', adhoc:'#FFFFFF', curve:'#46D2FF', bar
 const stage = $('#stage'), cv = $('#cv'), ctx = cv.getContext('2d');
 let dpr = 1;
 
-// Document state (shape defined in core.js) plus UI-only fields.
-const S = Object.assign(C.newState(), {
-  img:null, imgSha:null,
-  sel:null, tool:'place', scaleDraft:[], scaleManual:false,
-  view:{ s:1, ox:0, oy:0 }, labels:true, loupe:true,
-  hover:null, hoverScr:null, pointerType:'mouse',
-  isSample:false, docLoaded:false, warn:null,
-});
-window.__lmk = { S, C };   // used by the end-to-end tests
+// The specimen set: one shared template and one record per specimen (its image,
+// landmarks, scale and view). `S` is what the rest of the UI works on: its
+// document fields read and write the current specimen, `template` is the set's.
+const set = C.newSet();
+let cur = null;
+const S = { sel:null, tool:'place', scaleDraft:[], scaleManual:false, labels:true, loupe:true,
+  hover:null, hoverScr:null, pointerType:'mouse' };
+for (const k of ['raw', 'specimen', 'landmarks', 'curves', 'provenance', 'img', 'imgSha', 'view', 'isSample', 'warn'])
+  Object.defineProperty(S, k, { get: () => cur[k], set: v => { cur[k] = v; }, enumerable: true });
+Object.defineProperty(S, 'template', { get: () => set.template, set: v => { set.template = v; }, enumerable: true });
+Object.defineProperty(S, '_set', { get: () => set });
+window.__lmk = { S, C, set, get cur(){ return cur; } };   // used by the end-to-end tests
+
+let uidN = 0;
+function newRecord(fields){
+  const rec = Object.assign({ raw:{}, specimen:{ id:'', image:{ file:'', sha256:'', width:0, height:0 } },
+    landmarks:[], curves:[], provenance:{}, img:null, imgSha:null, view:null, isSample:false, warn:null, thumb:null, uid:++uidN }, fields);
+  return C.joinSet(set, rec);
+}
+/** Empty the set (keeping no specimen) and start from a template. */
+function resetSet(template){
+  set.specimens.splice(0);
+  set.template = template || C.emptyTemplate();
+  undoStack.length = 0;
+}
+const templateIsBlank = () => !(set.template.landmarks || []).length && !(set.template.curves || []).length;
+const hasData = r => r.landmarks.length > 0 || r.curves.length > 0;
+/** Show another specimen. */
+function switchTo(rec){
+  if (!rec) return;
+  S.tool = 'place'; S.scaleDraft = []; S.scaleManual = false; removing = false;
+  cur = rec; S.hover = null;
+  if (!cur.view){ cur.view = { s:1, ox:0, oy:0 }; fit(); }
+  setFields(); fixSel(); C.recomputeCurves(S); renderSide(); draw();
+}
+function stepSpecimen(d){
+  const j = set.specimens.indexOf(cur) + d;
+  if (j < 0) toast('This is the first specimen');
+  else if (j >= set.specimens.length) toast('This is the last specimen');
+  else switchTo(set.specimens[j]);
+}
+let removing = false;
+function removeCurrent(){
+  if (set.specimens.length < 2) return;
+  const i = set.specimens.indexOf(cur);
+  set.specimens.splice(i, 1);
+  undoStack.length = 0;
+  toast(`Removed ${cur.specimen.id} from the set. Its work stays saved in this browser.`);
+  switchTo(set.specimens[Math.min(i, set.specimens.length - 1)]);
+}
 
 // The Template tab (src/template-editor.js)
 const tplEditor = new window.LmkTemplateEditor($('#tplEditor'), {
@@ -48,24 +89,31 @@ const adhocEntries = () => C.adhocEntries(S);
 const scaleObj = () => C.scaleOf(S);
 const imgW = () => S.img ? S.img.width : (S.specimen.image?.width || 0);
 const imgH = () => S.img ? S.img.height : (S.specimen.image?.height || 0);
-const formOpts = () => ({ specimenId:$('#spId').value.trim(), notes:$('#spNotes').value.trim(), operator:$('#opName').value.trim() });
-const specimenId = () => $('#spId').value.trim() || S.specimen.id || 'specimen';
+const operator = () => $('#opName').value.trim();
 
 let toastT;
 function toast(msg, ms = 3200){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
 
 /* ---------- undo ---------- */
 const undoStack = [];
-const snap = () => JSON.stringify({ l:S.landmarks.map(stripGeom), c:S.curves.map(stripGeom), t:S.template, sc:S.specimen.image?.scale ?? null });
+const snap = () => JSON.stringify({ t:set.template, cur:set.specimens.indexOf(cur),
+  r:set.specimens.map(r => ({ l:r.landmarks.map(stripGeom), c:r.curves.map(stripGeom), sc:r.specimen.image?.scale ?? null })) });
 function stripGeom(o){ const r = {}; for (const k in o) if (k[0] !== '_') r[k] = o[k]; return r; }
 function pushUndo(){ undoStack.push(snap()); if (undoStack.length > 150) undoStack.shift(); }
 function undo(){
   const s = undoStack.pop(); if (!s){ toast('Nothing to undo'); return; }
-  const o = JSON.parse(s); S.landmarks = o.l; S.curves = o.c; S.template = o.t;
-  if (o.sc) S.specimen.image.scale = o.sc; else delete S.specimen.image.scale;
+  const o = JSON.parse(s);
+  set.template = o.t;
+  o.r.forEach((x, i) => {
+    const r = set.specimens[i]; if (!r) return;
+    r.landmarks = x.l; r.curves = x.c;
+    if (x.sc) r.specimen.image.scale = x.sc; else delete r.specimen.image.scale;
+  });
+  const back = set.specimens[o.cur];
+  if (back && back !== cur){ cur = back; setFields(); }   // show the specimen that changed
   changed();
 }
-function changed(){ fixSel(); C.recomputeCurves(S); renderSide(); draw(); autosave(); }
+function changed(){ fixSel(); for (const r of set.specimens) C.recomputeCurves(r); renderSide(); draw(); autosave(); }
 /** Keep the selection pointing at something that still exists. */
 function fixSel(){
   if (!S.sel || S.sel.kind === 'adhoc') return;
@@ -269,7 +317,7 @@ function updateHint(){
 function setFields(){
   $('#spId').value = S.specimen.id || '';
   $('#spNotes').value = S.specimen.notes || '';
-  if (S.provenance.operator) $('#opName').value = S.provenance.operator;
+  if (S.provenance.operator && !$('#opName').value.trim()) $('#opName').value = S.provenance.operator;
 }
 function unitOpts(u){ return C.UNITS.map(x => `<option value="${x}"${x === u ? ' selected' : ''}>${x === 'um' ? 'µm' : x}</option>`).join(''); }
 function renderSide(){
@@ -344,8 +392,54 @@ function renderSide(){
   $('#list').innerHTML = h;
 
   renderDetail();
+  renderStrip();
+  renderSpecimenActions();
+  const i = set.specimens.indexOf(cur);
+  $('#sSpec').innerHTML = set.specimens.length > 1 ? `<b>${esc(S.specimen.id)}</b> · ${i + 1} of ${set.specimens.length}` : '';
   updateHint();
   if (tplEditor.visible) tplEditor.requestRender();
+}
+
+/* ---------- thumbnail strip ---------- */
+let stripKey = '';
+function renderStrip(){
+  const el = $('#strip');
+  const key = set.specimens.map(r => `${r.uid}:${r.thumb ? 1 : 0}`).join(',');
+  if (key !== stripKey){
+    stripKey = key;
+    el.innerHTML = set.specimens.map(r => `<button type="button" class="thumb${r.thumb ? '' : ' noimg'}" data-uid="${r.uid}">`
+      + (r.thumb ? `<img src="${r.thumb}" alt="">` : `<span class="ph">image not open</span>`)
+      + `<span class="badge"></span><span class="tname"></span></button>`).join('')
+      + `<button type="button" class="thumb add" data-act="add-images">+ Add images</button>`;
+  }
+  for (const r of set.specimens){
+    const b = el.querySelector(`[data-uid="${r.uid}"]`); if (!b) continue;
+    const p = C.progress(r), badge = b.querySelector('.badge');
+    badge.textContent = `${p.done}/${p.total}`;
+    badge.className = 'badge' + (!p.total ? ' empty' : p.done === p.total ? ' ok' : '');
+    b.querySelector('.tname').textContent = r.specimen.id;
+    b.title = `${r.specimen.id}: ${p.done} of ${p.total} done`;
+    b.setAttribute('aria-label', `${r.specimen.id}, ${p.done} of ${p.total} done`);
+    b.setAttribute('aria-current', r === cur ? 'true' : 'false');
+  }
+  const sel = el.querySelector('[aria-current="true"]');
+  if (sel && sel.scrollIntoView && el.scrollWidth > el.clientWidth) sel.scrollIntoView({ block:'nearest', inline:'nearest' });
+}
+$('#strip').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.act === 'add-images'){ $('#fImg').click(); return; }
+  const rec = set.specimens.find(r => String(r.uid) === b.dataset.uid);
+  if (rec && rec !== cur) switchTo(rec);
+});
+
+function renderSpecimenActions(){
+  const el = $('#spActions');
+  if (set.specimens.length < 2){ el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = removing
+    ? `<div class="tpl-confirm" style="margin:0"><p class="confirm-text">Remove ${esc(S.specimen.id)} from the set? Its landmarks stay saved in this browser, so opening the image again brings them back.</p>
+       <div class="confirm-actions"><button class="btn sm danger" type="button" data-act="remove-yes">Remove</button><button class="btn sm" type="button" data-act="remove-no">Cancel</button></div></div>`
+    : `<button class="btn quiet" type="button" data-act="remove-spec">Remove this specimen from the set…</button>`;
 }
 function renderDetail(){
   const d = $('#detail');
@@ -438,101 +532,261 @@ function applyTemplate(t){
   changed();
 }
 
-/* ---------- documents and images ---------- */
-function loadState(st){ Object.assign(S, st); }
-function openDoc(d, srcName){
-  const st = C.parseDoc(d, srcName);
-  const keepImg = S.img && S.imgSha && st.specimen.image.sha256 === S.imgSha;
-  loadState(st);
-  S.isSample = false; S.docLoaded = true; S.warn = null;
-  S.tool = 'place'; S.scaleDraft = []; undoStack.length = 0;
-  if (!keepImg){ S.img = null; S.imgSha = null; }
-  S.sel = C.nextTodo(S, null) || (items()[0] || null);
-  setFields(); fit(); changed();
-  toast(keepImg ? `Opened ${srcName}` : `Opened ${srcName}. Now open ${st.specimen.image.file || 'its image'}.`, 5000);
+/* ---------- opening images and files ---------- */
+function makeThumb(src){
+  const k = Math.min(224 / src.width, 168 / src.height, 1);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(src.width * k)); c.height = Math.max(1, Math.round(src.height * k));
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8);
 }
-async function openImage(file){
-  const buf = await file.arrayBuffer();
-  const sha = await C.sha256Hex(buf);
-  let bmp;
-  try { bmp = await createImageBitmap(new Blob([buf], { type:file.type || 'image/jpeg' })); }
-  catch { toast(`Couldn't read ${file.name}. Use JPG, PNG or WebP.`, 5000); return; }
-  if (!S.img && S.docLoaded && !S.isSample){
-    const im = S.specimen.image; const msgs = [];
-    if (im.sha256 && sha && im.sha256 !== sha) msgs.push(`This image's checksum differs from the one in the file (${im.file}). If the image was edited or resized, every landmark may be shifted.`);
-    if (im.width && (im.width !== bmp.width || im.height !== bmp.height)) msgs.push(`Size is ${bmp.width} × ${bmp.height}, the file says ${im.width} × ${im.height}.`);
-    S.warn = msgs.join(' ') || null;
-    S.img = bmp; S.imgSha = sha;
-    S.specimen.image = { ...im, file:file.name, sha256:sha, width:bmp.width, height:bmp.height };
-    fit(); changed(); toast(`Opened ${file.name}`); return;
-  }
-  const keepTemplate = S.isSample ? C.emptyTemplate() : S.template;
-  loadState(C.newState());
-  S.template = keepTemplate;
-  S.img = bmp; S.imgSha = sha;
-  S.specimen = { id:C.stem(file.name), image:{ file:file.name, sha256:sha, width:bmp.width, height:bmp.height } };
-  S.isSample = false; S.docLoaded = true; S.warn = null;
-  S.tool = 'place'; S.scaleDraft = []; undoStack.length = 0;
-  let restored = false;
-  try {
-    const saved = sha && localStorage.getItem('lmk2d:' + sha);
-    if (saved){
-      const st = C.parseDoc(JSON.parse(saved), 'Saved work');
-      st.specimen.image = { ...st.specimen.image, file:file.name };
-      loadState(st); restored = true;
+function imageWarnings(im, sha, bmp){
+  const msgs = [];
+  if (im.sha256 && sha && im.sha256 !== sha) msgs.push(`This image's checksum differs from the one in the file (${im.file}). If the image was edited or resized, every landmark may be shifted.`);
+  if (im.width && (im.width !== bmp.width || im.height !== bmp.height)) msgs.push(`Size is ${bmp.width} × ${bmp.height}, the file says ${im.width} × ${im.height}.`);
+  return msgs.join(' ') || null;
+}
+function loadSaved(sha){
+  try { const t = sha && localStorage.getItem('lmk2d:' + sha); return t ? C.parseDoc(JSON.parse(t), 'Saved work') : null; }
+  catch { return null; }
+}
+function uniqueId(id, except){
+  let out = id || 'specimen', k = 2;
+  while (set.specimens.some(r => r !== except && r.specimen.id === out && C.replicateOf(r) === C.replicateOf(except || { specimen:{} }))) out = `${id}_${k++}`;
+  return out;
+}
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/**
+ * Open images. Each becomes a specimen, unless it is the image an opened
+ * landmark file is waiting for (matched by checksum, then by file name).
+ * Unsaved work kept in this browser is restored when the template matches.
+ */
+async function openImages(fileList){
+  const files = [...fileList].filter(f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name));
+  if (!files.length) return;
+  const added = [], notes = [];
+  let restored = 0, already = 0;
+  for (const file of files){
+    let sha, bmp;
+    try {
+      const buf = await file.arrayBuffer();
+      sha = await C.sha256Hex(buf);
+      bmp = await createImageBitmap(new Blob([buf], { type:file.type || 'image/png' }));
+    } catch { notes.push(`Couldn't read ${file.name}. Use JPG, PNG or WebP.`); continue; }
+    const open = C.findBySha(set, sha);
+    if (open && open.img){ already++; continue; }
+    let rec = (open && !open.img) ? open
+      : set.specimens.find(r => !r.img && !r.isSample && r.specimen.image.file === file.name)
+      || (files.length === 1 && cur && !cur.img && !cur.isSample ? cur : null);
+    if (rec){   // the image a landmark file was waiting for
+      rec.warn = imageWarnings(rec.specimen.image, sha, bmp);
+      rec.img = bmp; rec.imgSha = sha; rec.thumb = makeThumb(bmp); rec.view = null;
+      rec.specimen.image = { ...rec.specimen.image, file:file.name, sha256:sha, width:bmp.width, height:bmp.height };
+      added.push(rec); continue;
     }
-  } catch {}
-  S.sel = C.nextTodo(S, null) || items()[0] || null;
-  setFields(); fit(); changed();
-  toast(restored ? `Restored your unsaved work on ${file.name} from this browser` : `Opened ${file.name}`, 4000);
+    if (set.specimens.some(r => r.isSample)) resetSet();   // the sample makes way for real images
+    rec = newRecord({ specimen:{ id:C.stem(file.name), image:{ file:file.name, sha256:sha, width:bmp.width, height:bmp.height } },
+      img:bmp, imgSha:sha, thumb:makeThumb(bmp) });
+    const saved = loadSaved(sha);
+    if (saved){
+      const fresh = templateIsBlank() && !set.specimens.some(r => r !== rec && hasData(r));
+      const diff = fresh ? null : C.templateDifference(set.template, saved.template);
+      if (diff) notes.push(`Saved work on ${file.name} wasn't restored: ${diff}.`);
+      else {
+        if (fresh) set.template = saved.template;
+        Object.assign(rec, { raw:saved.raw, landmarks:saved.landmarks, curves:saved.curves, provenance:saved.provenance,
+          specimen:{ ...saved.specimen, image:{ ...saved.specimen.image, file:file.name } } });
+        restored++;
+      }
+    }
+    rec.specimen.id = uniqueId(rec.specimen.id, rec);
+    added.push(rec);
+  }
+  if (added.length){
+    undoStack.length = 0;
+    switchTo(added[0]);
+    changed();
+  }
+  let msg;
+  if (files.length === 1 && added.length === 1) msg = restored ? `Restored your unsaved work on ${files[0].name} from this browser` : `Opened ${files[0].name}`;
+  else if (added.length) msg = `Opened ${plural(added.length, 'image')}` + (restored ? `, with saved work restored for ${restored}` : '') + '.';
+  else msg = '';
+  if (already) msg += ` ${plural(already, 'image')} ${already === 1 ? 'was' : 'were'} already open.`;
+  if (notes.length) msg += ' ' + notes.join(' ');
+  if (msg.trim()) toast(msg.trim(), notes.length ? 8000 : 4000);
 }
-async function openJsonFile(file){
-  let d;
-  try { d = JSON.parse(await file.text()); } catch { toast(`${file.name} is not valid JSON`, 4000); return; }
-  try {
-    const kind = C.sniffJson(d);
-    if (kind === 'doc') openDoc(d, file.name);
-    else if (kind === 'template'){ applyTemplate(C.checkTemplate(d)); toast(`Loaded template ${d.name || d.id || file.name}`); }
-    else throw new Error(`${file.name} is neither a landmark file nor a template`);
-  } catch (e){ toast(e.message, 6000); }
+
+/** Read .lmk.json, template .json and .zip files into [{ source, name, doc | error }]. */
+async function readDataFiles(fileList){
+  const out = [];
+  const parse = (source, name, text) => {
+    try { out.push({ source, name, doc:JSON.parse(text) }); }
+    catch { out.push({ source, name, error:`${name} is not valid JSON` }); }
+  };
+  for (const f of fileList){
+    if (/\.zip$/i.test(f.name) || f.type === 'application/zip'){
+      try {
+        const parts = (await C.unzipFiles(new Uint8Array(await f.arrayBuffer()))).filter(x => /\.json$/i.test(x.name));
+        if (!parts.length) out.push({ source:f.name, name:f.name, error:`${f.name} has no landmark files in it` });
+        for (const x of parts) parse(f.name, x.name.split('/').pop(), new TextDecoder().decode(x.data));
+      } catch (e){ out.push({ source:f.name, name:f.name, error:`${f.name}: ${e.message}` }); }
+    } else parse(f.name, f.name, await f.text());
+  }
+  return out;
 }
+
+/** Open landmark files (or a hand-in zip) into the set. All must use the set's template. */
+async function openDataFiles(fileList){
+  const entries = await readDataFiles([...fileList]);
+  const added = [], problems = [];
+  for (const en of entries){
+    if (en.error){ problems.push(en.error + '.'); continue; }
+    const kind = C.sniffJson(en.doc);
+    if (kind === 'template'){
+      try { applyTemplate(C.checkTemplate(en.doc)); toast(`Loaded template ${en.doc.name || en.doc.id || en.name}`); }
+      catch (e){ problems.push(e.message); }
+      continue;
+    }
+    if (kind !== 'doc'){ problems.push(`${en.name} is neither a landmark file nor a template.`); continue; }
+    let st;
+    try { st = C.parseDoc(en.doc, en.name); } catch (e){ problems.push(e.message); continue; }
+    if (set.specimens.every(r => r.isSample)){ resetSet(st.template); cur = null; }
+    else if (templateIsBlank() && !set.specimens.some(hasData)) set.template = st.template;
+    else {
+      const diff = C.templateDifference(set.template, st.template);
+      if (diff){ problems.push(`${en.name} was not opened: ${diff}. All specimens in a set must use the same template.`); continue; }
+    }
+    const fields = { raw:st.raw, landmarks:st.landmarks, curves:st.curves, provenance:st.provenance };
+    const bySha = C.findBySha(set, st.specimen.image.sha256);
+    let rec;
+    if (bySha && !hasData(bySha)){   // its image is already open: fill it in
+      rec = Object.assign(bySha, fields, { specimen:{ ...st.specimen, image:{ ...st.specimen.image, file:bySha.specimen.image.file } } });
+    } else if (set.specimens.some(r => r.specimen.id === st.specimen.id && C.replicateOf(r) === C.replicateOf(st))){
+      problems.push(`${st.specimen.id} is already open, so ${en.name} was skipped.`); continue;
+    } else rec = newRecord({ ...fields, specimen:st.specimen });
+    added.push(rec);
+  }
+  if (added.length){
+    undoStack.length = 0;
+    switchTo(added[0]);
+    changed();
+    const waiting = added.filter(r => !r.img);
+    let msg = added.length === 1 ? `Opened ${entries.find(e => !e.error && e.doc && C.sniffJson(e.doc) === 'doc').name}.` : `Opened ${plural(added.length, 'specimen')}.`;
+    if (waiting.length === 1) msg += ` Now open ${waiting[0].specimen.image.file || 'its image'}.`;
+    else if (waiting.length > 1) msg += ` Now open their ${waiting.length} images (you can select them all at once).`;
+    toast([msg, ...problems].join(' '), problems.length ? 9000 : 5000);
+  } else if (problems.length) toast(problems.join(' '), 7000);
+}
+
 let saveT;
 function autosave(){
   clearTimeout(saveT);
   saveT = setTimeout(() => {
-    if (S.isSample || !S.imgSha) return;
-    try {
-      localStorage.setItem('lmk2d:' + S.imgSha, JSON.stringify(C.buildDoc(S, formOpts())));
-      $('#sSave').textContent = 'kept in this browser ' + new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    } catch {}
+    let n = 0;
+    for (const r of set.specimens){
+      const key = r.imgSha || r.specimen.image?.sha256;
+      if (r.isSample || !key) continue;
+      try { localStorage.setItem('lmk2d:' + key, JSON.stringify(C.buildDoc(r, { operator:operator() || undefined }))); n++; } catch {}
+    }
+    if (n) $('#sSave').textContent = 'kept in this browser ' + new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   }, 500);
 }
 
 /* ---------- export ---------- */
-function exportNote(){ const n = C.notDoneCount(C.exportRows(S)); return n ? ` ${n} point${n === 1 ? ' was' : 's were'} not done and ${n === 1 ? 'is' : 'are'} written as missing.` : ''; }
-function exportTPS(){ if (!imgW()){ toast('Open an image first'); return; } saveFile(`${specimenId()}.tps`, C.toTPS(S, specimenId()), exportNote()); }
-function exportCSV(){ if (!imgW()){ toast('Open an image first'); return; } saveFile(`${specimenId()}.csv`, C.toCSV(S, specimenId()), exportNote()); }
+/** The set as plain states for export, with the operator name filled in. */
+function exportStates(){
+  return set.specimens.map(r => ({ raw:r.raw, specimen:r.specimen, template:set.template, landmarks:r.landmarks, curves:r.curves,
+    provenance:{ ...r.provenance, ...(operator() ? { operator:operator() } : {}) } }));
+}
+function exportBase(){
+  return set.specimens.length === 1 ? (C.safeName(cur.specimen.id) || 'specimen') : `${C.safeName(operator()) || 'specimens'}_landmarks`;
+}
+function exportNote(states){
+  const n = states.reduce((k, st) => k + C.notDoneCount(C.exportRows(st)), 0);
+  return n ? ` ${n} point${n === 1 ? ' was' : 's were'} not done and ${n === 1 ? 'is' : 'are'} written as missing.` : '';
+}
+function exportTPS(){ if (!imgW()){ toast('Open an image first'); return; } const st = exportStates(); saveFile(`${exportBase()}.tps`, C.toTPS(st), exportNote(st)); }
+function exportCSV(){ if (!imgW()){ toast('Open an image first'); return; } const st = exportStates(); saveFile(`${exportBase()}.csv`, C.toCSV(st), exportNote(st)); }
+
+/* ---------- hand-in (students) ---------- */
+function openHandIn(){
+  if (set.specimens.every(r => r.isSample)){ toast('Open your own images first. The sample is not part of a hand-in.', 5000); return; }
+  $('#hiName').value = operator();
+  $('#hiErr').textContent = '';
+  const rows = set.specimens.map(r => { const p = C.progress(r); return { id:r.specimen.id, ...p }; });
+  const unfinished = rows.filter(r => r.done < r.total);
+  $('#hiSummary').innerHTML = `<p class="hint">${plural(rows.length, 'specimen')} in this hand-in:</p>
+    <ul class="hi-list">${rows.map(r => `<li><span class="mono">${esc(r.id)}</span><span class="mono ${r.done === r.total ? 'ok' : 'bad'}">${r.done}/${r.total}</span></li>`).join('')}</ul>
+    ${unfinished.length ? `<p class="hint">${plural(unfinished.length, 'specimen')} ${unfinished.length === 1 ? 'isn’t' : 'aren’t'} finished. You can still hand in: points not done are written as missing.</p>` : ''}`;
+  $('#dHandin').showModal();
+  $('#hiName').focus();
+}
+$('#handinForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#hiName').value.trim();
+  if (!name){ $('#hiErr').textContent = 'Enter your name, so your instructor can tell your files apart.'; $('#hiName').focus(); return; }
+  $('#opName').value = name;
+  try { localStorage.setItem('lmk2d:operator', name); } catch {}
+  const zip = C.zipFiles(C.handInFiles(exportStates(), { operator:name }));
+  $('#dHandin').close();
+  autosave();
+  saveFile(`${C.safeName(name) || 'hand-in'}_landmarks.zip`, zip);
+});
+$('#hiCancel').onclick = () => $('#dHandin').close();
+
+/* ---------- combine hand-ins (instructors) ---------- */
+let combined = null;
+async function runCombine(fileList){
+  const entries = await readDataFiles([...fileList]);
+  const unreadable = entries.filter(e => e.error).map(e => ({ source:e.source, name:e.name, reason:e.error + '.' }));
+  combined = C.combineEntries(entries.filter(e => !e.error));
+  combined.refused.unshift(...unreadable);
+  const r = combined;
+  const list = (rows, title) => rows.length ? `<p class="cb-h">${title}</p><ul class="cb-list">${rows.map(x => `<li><b>${esc(x.source && x.source !== x.name ? x.source + ' › ' + x.name : x.name)}</b> ${esc(x.reason)}</li>`).join('')}</ul>` : '';
+  $('#cbResult').innerHTML = r.states.length ? `
+    <p><b>${plural(r.states.length, 'specimen')}</b> from ${plural(r.operators.length, 'student')} will be combined, using the template “${esc(r.template.name || r.template.id)}”.</p>
+    <div class="cb-table"><table><thead><tr><th>Student</th><th>Specimens</th><th>Finished</th></tr></thead><tbody>
+      ${r.operators.map(o => `<tr><td>${esc(o.operator)}</td><td class="num">${o.specimens}</td><td class="num ${o.complete === o.specimens ? 'ok' : 'bad'}">${o.complete}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${r.shared.length ? `<p class="hint">Done by more than one student: ${r.shared.map(x => `${esc(x.id)} (${x.operators})`).join(', ')}. Their IDs get the student’s name added, e.g. <span class="mono">${esc(r.ids[r.states.findIndex(st => st.specimen.id === r.shared[0].id)])}</span>, so you can use them for between-student error.</p>` : ''}
+    ${list(r.refused, 'Not combined')}${list(r.skipped, 'Skipped (already included)')}`
+    : `<p>Nothing could be combined.</p>${list(r.refused, 'Not combined')}`;
+  $('#cbTps').disabled = $('#cbCsv').disabled = !r.states.length;
+}
+function openCombine(){ combined = null; $('#cbResult').innerHTML = ''; $('#cbTps').disabled = $('#cbCsv').disabled = true; $('#dCombine').showModal(); }
+$('#cbChoose').onclick = () => $('#fCombine').click();
+$('#fCombine').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) runCombine(f); };
+$('#cbTps').onclick = () => combined && saveFile('combined_landmarks.tps', C.toTPS(combined.states, combined.ids));
+$('#cbCsv').onclick = () => combined && saveFile('combined_landmarks.csv', C.toCSV(combined.states, combined.ids));
+$('#cbClose').onclick = () => $('#dCombine').close();
 
 /* ---------- saving files ----------
  * Inside a claude.ai artifact, downloads go through the `downloads` capability
  * (which only allows some extensions, so .tps becomes .tps.txt there).
  * Anywhere else (GitHub Pages, a local copy) a normal download link is used. */
 let dlP = null;
-async function saveFile(name, text, note = ''){
+async function saveFile(name, data, note = ''){
+  const binary = typeof data !== 'string';
   const c = window.claude;
   if (c && typeof c.use === 'function'){
     if (!dlP) dlP = Promise.resolve(c.use('downloads')).catch(() => null);
     const dl = await dlP;
     if (dl){
-      const fname = /\.(json|csv|txt)$/i.test(name) ? name : name + '.txt';
-      try { await dl.save({ filename:fname, data:text }); toast((fname === name ? `Saved ${name}.` : `Saved ${fname}. Rename it to ${name}.`) + note, 6000); }
-      catch (e){ if (e && e.code === 'declined') return; if (e && e.code === 'rate_limited'){ toast('A save prompt is already open'); return; } showText(name, text); }
+      const fname = /\.(json|csv|txt|zip)$/i.test(name) ? name : name + '.txt';
+      try { await dl.save({ filename:fname, data }); toast((fname === name ? `Saved ${name}.` : `Saved ${fname}. Rename it to ${name}.`) + note, 6000); }
+      catch (e){
+        if (e && e.code === 'declined') return;
+        if (e && e.code === 'rate_limited'){ toast('A save prompt is already open'); return; }
+        if (binary) toast(`${name} couldn't be saved here (${e && e.message || 'download refused'}).`, 6000); else showText(name, data);
+      }
       return;
     }
-    showText(name, text); return;
+    if (binary) toast(`${name} can't be saved in this view. Open the app from its web address to download it.`, 7000); else showText(name, data);
+    return;
   }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type:'text/plain' }));
+  a.href = URL.createObjectURL(new Blob([data], { type: /\.zip$/i.test(name) ? 'application/zip' : 'text/plain' }));
   a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   toast(`Saved ${name}.` + note, 5000);
@@ -643,6 +897,10 @@ $('#side').addEventListener('click', e => {
   else if (act === 'scale-manual-apply') applyManual();
   else if (act === 'scale-remove'){ pushUndo(); delete S.specimen.image.scale; changed(); }
   else if (act === 'goto-template') selectTab($('#t-template'));
+  else if (act === 'combine') openCombine();
+  else if (act === 'remove-spec'){ removing = true; renderSpecimenActions(); }
+  else if (act === 'remove-no'){ removing = false; renderSpecimenActions(); }
+  else if (act === 'remove-yes'){ removing = false; removeCurrent(); }
   else if (act === 'dismiss-warn'){ S.warn = null; renderSide(); }
 });
 $('#side').addEventListener('change', e => {
@@ -653,7 +911,14 @@ $('#side').addEventListener('change', e => {
     if (ent){ if (v) ent.note = v; else delete ent.note; }
     autosave();
   } else if (id === 'adLabel' && S.sel){ const ent = lmEntry(S.sel.id); if (ent){ ent.label = e.target.value.trim(); changed(); } }
-  else if (id === 'spId'){ S.specimen.id = e.target.value.trim(); autosave(); }
+  else if (id === 'spId'){
+    const v = e.target.value.trim();
+    if (!v){ e.target.value = S.specimen.id; return; }
+    if (set.specimens.some(r => r !== cur && r.specimen.id === v && C.replicateOf(r) === C.replicateOf(cur))){
+      toast(`Another specimen in the set is already called ${v}.`); e.target.value = S.specimen.id; return;
+    }
+    S.specimen.id = v; renderSide(); autosave();
+  }
   else if (id === 'spNotes'){ S.specimen.notes = e.target.value.trim(); autosave(); }
   else if (id === 'opName'){ try { localStorage.setItem('lmk2d:operator', e.target.value.trim()); } catch {} autosave(); }
 });
@@ -668,8 +933,9 @@ $('#tplCancel').onclick = () => $('#dTpl').close();
 /* ---------- toolbar ---------- */
 $('#bOpenImg').onclick = () => $('#fImg').click();
 $('#bOpenDoc').onclick = () => $('#fDoc').click();
-$('#fImg').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openImage(f); };
-$('#fDoc').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openJsonFile(f); };
+$('#fImg').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) openImages(f); };
+$('#fDoc').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) openDataFiles(f); };
+$('#bHandin').onclick = openHandIn;
 $('#fTpl').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   f.text().then(txt => {
     try { const d = JSON.parse(txt); applyTemplate(C.checkTemplate(C.sniffJson(d) === 'doc' ? d.template : d)); toast('Template loaded'); }
@@ -677,7 +943,7 @@ $('#fTpl').onchange = e => { const f = e.target.files[0]; e.target.value = ''; i
   }); };
 $('#bSave').onclick = () => {
   if (!imgW()){ toast('Open an image first'); return; }
-  const d = C.buildDoc(S, formOpts()); saveFile(`${d.specimen.id}.lmk.json`, JSON.stringify(d, null, 2) + '\n');
+  const d = C.buildDoc(S, { operator:operator() || undefined }); saveFile(C.docFileName(cur), JSON.stringify(d, null, 2) + '\n');
 };
 $('#bTps').onclick = exportTPS;
 $('#bCsv').onclick = exportCSV;
@@ -695,9 +961,9 @@ stage.addEventListener('dragleave', () => { if (--dragDepth <= 0){ dragDepth = 0
 stage.addEventListener('drop', async e => {
   e.preventDefault(); dragDepth = 0; $('#drop').hidden = true;
   const files = [...(e.dataTransfer?.files || [])];
-  const js = files.filter(f => /\.json$/i.test(f.name)), imgs = files.filter(f => /^image\//.test(f.type));
-  for (const f of js) await openJsonFile(f);
-  if (imgs[0]) await openImage(imgs[0]);
+  const data = files.filter(f => /\.(json|zip)$/i.test(f.name)), imgs = files.filter(f => /^image\//.test(f.type));
+  if (data.length) await openDataFiles(data);
+  if (imgs.length) await openImages(imgs);
 });
 
 document.addEventListener('keydown', e => {
@@ -707,6 +973,7 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); undo(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === 'escape'){ if (S.tool !== 'place') cancelScale(); return; }
+  if (e.key === '[' || e.key === ']'){ stepSpecimen(e.key === ']' ? 1 : -1); return; }
   if (k === 'n'){ e.preventDefault(); const n = nextTodo(); if (n){ S.sel = n; renderSide(); draw(); } else toast('Every template point is done'); return; }
   if (k === 'm'){ setStatus('missing'); return; }
   if (k === 'e'){ if (S.sel && S.sel.kind === 'lm'){ const ent = lmEntry(S.sel.id); setStatus(ent && ent.status === 'estimated' ? 'placed' : 'estimated'); } else setStatus('estimated'); return; }
@@ -758,8 +1025,8 @@ function makeSample(){
 }
 function loadSample(){
   const { c, B, A, U1, U2 } = makeSample();
-  loadState(C.newState());
-  S.img = c; S.isSample = true; S.docLoaded = true;
+  resetSet();
+  cur = newRecord({ img:c, isSample:true, thumb:makeThumb(c) });
   S.template = {
     id:'leaf-basic', name:'Leaf outline, basic set', version:'1.0', dimensions:2,
     description:'Example template for the sample image.',
@@ -787,7 +1054,7 @@ function loadSample(){
   S.specimen = { id:'LEAF_SAMPLE', image:{ file:'sample_leaf.png', sha256:'', width:c.width, height:c.height,
     scale:{ value:0.025, units:'mm', method:'scale_bar', bar:{ points:[[1120.5, 1005.5], [1520.5, 1005.5]], length:10 } } } };
   S.sel = { kind:'lm', id:'LM05' };
-  setFields(); C.recomputeCurves(S); resize(); fit(); renderSide();
+  switchTo(cur); resize(); fit();
   c.toBlob(async b => { if (b && S.isSample){ S.specimen.image.sha256 = await C.sha256Hex(await b.arrayBuffer()); renderSide(); } }, 'image/png');
 }
 
