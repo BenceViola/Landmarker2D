@@ -135,3 +135,18 @@ test('sniffJson tells documents from templates', () => {
   assert.equal(C.sniffJson(SPEC_EXAMPLE.template), 'template');
   assert.equal(C.sniffJson({ hello: 1 }), null);
 });
+
+test('specimen.replicate (format v0.3) survives opening and saving', () => {
+  const d = JSON.parse(JSON.stringify(SPEC_EXAMPLE));
+  d.version = '0.3.0';
+  d.specimen.replicate = 2;
+  const out = C.buildDoc(C.parseDoc(d, 'FISH_03_r2.lmk.json'), { now: NOW });
+  assert.equal(out.specimen.replicate, 2);
+  assert.equal(out.version, '0.3.0', 'the newer version is kept, not relabelled 0.2.0');
+});
+
+test('an older file is saved with the app\'s format version', () => {
+  const d = JSON.parse(JSON.stringify(SPEC_EXAMPLE));
+  d.version = '0.1.0';
+  assert.equal(C.buildDoc(C.parseDoc(d), { now: NOW }).version, C.FORMAT_VERSION);
+});

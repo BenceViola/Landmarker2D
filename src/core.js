@@ -547,7 +547,8 @@
     const now = opts.now || nowIso();
     const d = clone(s.raw || {});
     d.format = 'landmark-json';
-    d.version = FORMAT_VERSION;
+    // Re-saving a file from a newer minor version keeps its version, since its extra fields are kept too.
+    d.version = newerVersion(d.version, FORMAT_VERSION);
     const sp = clone(s.specimen);
     delete sp.mesh;
     if (opts.specimenId !== undefined) sp.id = opts.specimenId;
@@ -567,6 +568,14 @@
     prov.modified = now;
     d.provenance = prov;
     return d;
+  }
+  /** The higher of two MAJOR.MINOR.PATCH strings (the second wins if the first is missing or malformed). */
+  function newerVersion(a, b) {
+    const p = v => (typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v)) ? v.split('.').map(Number) : null;
+    const x = p(a), y = p(b);
+    if (!x) return b;
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i] ? a : b;
+    return b;
   }
   /** Validate a parsed .lmk.json and return the state it describes. Throws with a readable message. */
   function parseDoc(d, srcName) {
