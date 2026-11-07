@@ -294,3 +294,22 @@ test('combining hand-ins from several students', async ({ page }, testInfo) => {
   await expect(thumbs(page)).toHaveCount(1);
   await expect(page.locator('#sampleTag')).toBeVisible();
 });
+
+test('switching specimens starts at the first unfinished landmark', async ({ page }, testInfo) => {
+  await openApp(page);
+  await openFish(page, testInfo, 3);
+  await placeAll(page);   // the selection stays on LM03, the last one placed
+  const sel = () => page.evaluate(() => window.__lmk.S.sel);
+  await page.keyboard.press(']');
+  expect(await sel()).toEqual({ kind: 'lm', id: 'LM01' });
+  await expect(row(page, 'LM01')).toHaveClass(/sel/);
+  await clickImage(page, [50, 150]);   // lands on LM01 of FISH_02
+  expect((await getState(page)).landmarks.map(e => e.id)).toEqual(['LM01']);
+
+  await page.keyboard.press(']');
+  await page.keyboard.press('[');   // back to the half-done FISH_02: first gap
+  expect(await sel()).toEqual({ kind: 'lm', id: 'LM02' });
+  await page.keyboard.press('[');   // FISH_01 is finished: nothing selected, so no point moves by accident
+  expect(await sel()).toBeNull();
+  await expect(page.locator('#hint')).toContainText('All template points are done');
+});

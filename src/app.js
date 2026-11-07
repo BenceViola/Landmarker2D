@@ -22,7 +22,7 @@ for (const k of ['raw', 'specimen', 'landmarks', 'curves', 'provenance', 'img', 
   Object.defineProperty(S, k, { get: () => cur[k], set: v => { cur[k] = v; }, enumerable: true });
 Object.defineProperty(S, 'template', { get: () => set.template, set: v => { set.template = v; }, enumerable: true });
 Object.defineProperty(S, '_set', { get: () => set });
-window.__lmk = { S, C, set, get cur(){ return cur; } };   // used by the end-to-end tests
+window.__lmk = { S, C, set, get cur(){ return cur; }, get loupe(){ return lastLoupe; } };   // used by the end-to-end tests
 
 let uidN = 0;
 function newRecord(fields){
@@ -44,7 +44,10 @@ function switchTo(rec){
   S.tool = 'place'; S.scaleDraft = []; S.scaleManual = false; removing = false;
   cur = rec; S.hover = null;
   if (!cur.view){ cur.view = { s:1, ox:0, oy:0 }; fit(); }
-  setFields(); fixSel(); C.recomputeCurves(S); renderSide(); draw();
+  // start each specimen at its first unfinished item (Landmark 1 on a new one);
+  // nothing is selected on a finished specimen, so a stray click can't move a point
+  S.sel = C.nextTodo(S, null);
+  setFields(); C.recomputeCurves(S); renderSide(); draw();
 }
 function stepSpecimen(d){
   const j = set.specimens.indexOf(cur) + d;
@@ -273,10 +276,20 @@ function draw(){
   drawLoupe(w, h);
   updateHint();
 }
+let lastLoupe = null;   // what the loupe showed last, for the tests
 function drawLoupe(w, h){
-  if (!S.loupe || !S.img || !S.hover || !S.hoverScr || S.pointerType !== 'mouse' || gesture) return;
+  lastLoupe = null;
+  if (!S.loupe || !S.img || !S.hover || !S.hoverScr || S.pointerType !== 'mouse') return;
+  // While a point is dragged the loupe follows the point itself (not the cursor,
+  // which may have grabbed it slightly off-centre); other gestures hide it.
+  const dragging = gesture && gesture.type === 'drag' && gesture.moved;
+  if (gesture && !dragging) return;
   const size = 150, z = Math.max(S.view.s * 3, 4), sw = size / z;
-  const [hx, hy] = S.hover, [sx, sy] = S.hoverScr;
+  const [hx, hy] = dragging
+    ? [clamp(S.hover[0] - gesture.off[0], 0, imgW()), clamp(S.hover[1] - gesture.off[1], 0, imgH())]
+    : S.hover;
+  const [sx, sy] = S.hoverScr;
+  lastLoupe = { center:[hx, hy], dragging:!!dragging };
   const lx = (sx < size + 40 && sy < size + 40) ? w - size - 12 : 12, ly = 12;
   const left = hx - sw/2, top = hy - sw/2;
   ctx.save();
@@ -288,6 +301,11 @@ function drawLoupe(w, h){
   const mp = p => [lx + (p[0]-left)*z, ly + (p[1]-top)*z];
   for (const e of S.landmarks){ if (!e.position || e.status === 'missing') continue; const [x, y] = mp(e.position);
     if (x > lx-10 && x < lx+size+10 && y > ly-10 && y < ly+size+10) ring(x, y, 6, S.sel && S.sel.id === e.id ? COL.sel : COL.lm, e.status === 'estimated'); }
+  // curve control points and scale-bar ends can be dragged too
+  const square = (p, color) => { const [x, y] = mp(p); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.strokeRect(x-4, y-4, 8, 8); ctx.lineWidth = 1.25; ctx.strokeStyle = color; ctx.strokeRect(x-4, y-4, 8, 8); };
+  for (const c of S.curves) for (const cp of c.control_points || []) square(cp.position, '#FFFFFF');
+  const bar = scaleObj()?.bar?.points;
+  if (bar && S.tool === 'place') bar.forEach(p => square(p, COL.bar));
   ctx.strokeStyle = 'rgba(255,79,176,.95)'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(lx + size/2, ly); ctx.lineTo(lx + size/2, ly + size/2 - 6); ctx.moveTo(lx + size/2, ly + size/2 + 6); ctx.lineTo(lx + size/2, ly + size);
   ctx.moveTo(lx, ly + size/2); ctx.lineTo(lx + size/2 - 6, ly + size/2); ctx.moveTo(lx + size/2 + 6, ly + size/2); ctx.lineTo(lx + size, ly + size/2); ctx.stroke();

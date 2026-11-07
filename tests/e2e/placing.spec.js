@@ -173,3 +173,30 @@ test('editing the template as text applies it and reports mistakes', async ({ pa
   expect(st.curves).toEqual([]);
   expect(st.landmarks.find(e => e.id === 'LM02').template_id).toBeNull();
 });
+
+test('the loupe stays on while a landmark is dragged, centred on the landmark', async ({ page }) => {
+  await openApp(page);
+  const loupe = () => page.evaluate(() => window.__lmk.loupe);
+  const start = (await getState(page)).landmarks.find(e => e.id === 'LM02').position;
+  const [x, y] = await imgToPage(page, start);
+  await page.mouse.move(x + 2, y + 1);   // grab it slightly off-centre
+  expect(await loupe()).not.toBeNull();
+  await page.mouse.down();
+  await page.mouse.move(x + 22, y + 11, { steps: 4 });
+  const during = await loupe();
+  expect(during.dragging).toBe(true);
+  const now = (await getState(page)).landmarks.find(e => e.id === 'LM02').position;
+  expect(during.center[0]).toBeCloseTo(now[0], 3);
+  expect(during.center[1]).toBeCloseTo(now[1], 3);
+  await page.mouse.up();
+  expect((await loupe()).dragging).toBe(false);
+});
+
+test('panning hides the loupe', async ({ page }) => {
+  await openApp(page);
+  const [x, y] = await imgToPage(page, [900, 950]);
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x + 40, y + 20, { steps: 4 });
+  expect(await page.evaluate(() => window.__lmk.loupe)).toBeNull();
+  await page.mouse.up();
+});
