@@ -18,7 +18,8 @@ async function setUp(page, testInfo, { shuffle = false } = {}) {
   await setTemplate(page, TEMPLATE);
   for (const p of POS) await clickImage(page, p);
   await openTab(page, 'Specimen');
-  if (!shuffle) await page.locator('#repShuffle').uncheck();
+  await expect(page.locator('#repShuffle')).not.toBeChecked();   // template order by default
+  if (shuffle) await page.locator('#repShuffle').check();
   await page.locator('[data-act="rep-new"]').click();
   return imgs;
 }

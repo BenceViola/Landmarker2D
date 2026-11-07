@@ -567,7 +567,7 @@ $('#gallery').addEventListener('click', e => {
 });
 
 /* ---------- replicates ---------- */
-let repShuffle = true;
+let repShuffle = false;   // random order is an option, off by default
 function landmarkAgain(){
   if (!cur.img){ toast('Open this specimen’s image first.'); return; }
   const src = cur, n = C.nextReplicate(set.specimens, src);
