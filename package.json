@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/BenceViola/landmarker2D.git"
+    "url": "https://github.com/BenceViola/Landmarker2D.git"
   },
   "engines": {
     "node": ">=20"
