@@ -50,7 +50,21 @@
       </div>
       <div class="drop" id="drop" hidden>Drop images, .lmk.json files, a hand-in zip or a template</div>
     </section>
-    <div class="strip" id="strip" role="group" aria-label="Specimens ([ and ] to switch)"></div>
+    <div class="bottom">
+      <div class="bottombar">
+        <div class="seg" role="group" aria-label="View">
+          <button type="button" id="vSpecimens" class="on" aria-pressed="true" title="Specimens in this set ([ and ] to switch)">Specimens</button>
+          <button type="button" id="vCompare" aria-pressed="false" title="The selected landmark on every specimen (G)">Compare</button>
+        </div>
+        <span class="gal-head" id="galHead"></span>
+        <span class="gal-zoom" id="galZoom" hidden>
+          <button type="button" class="btn sm" id="galCloser" title="Show less around the landmark">Closer</button>
+          <button type="button" class="btn sm" id="galWider" title="Show more around the landmark">Wider</button>
+        </span>
+      </div>
+      <div class="strip" id="strip" role="group" aria-label="Specimens ([ and ] to switch)"></div>
+      <div class="gallery" id="gallery" role="group" aria-label="Selected landmark on every specimen" hidden></div>
+    </div>
     </div>
 
     <aside class="side" id="side">
@@ -79,7 +93,8 @@
           <div class="keys">
             Click to place · drag a point to move · drag empty space to pan · wheel to zoom<br>
             <kbd>N</kbd> next to-do · <kbd>E</kbd> estimated · <kbd>M</kbd> missing · <kbd>Del</kbd> clear<br>
-            <kbd>⌫</kbd> remove last curve point · <kbd>F</kbd> fit · <kbd>L</kbd> labels · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo
+            <kbd>⌫</kbd> remove last curve point · <kbd>F</kbd> fit · <kbd>L</kbd> labels · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo<br>
+            <kbd>[</kbd> <kbd>]</kbd> previous / next specimen · <kbd>G</kbd> compare across specimens
           </div>
         </div>
       </div>

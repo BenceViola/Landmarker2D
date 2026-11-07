@@ -76,8 +76,12 @@ test('dragging empty space pans the view without placing anything', async ({ pag
 
 test('the mouse wheel zooms around the cursor', async ({ page }) => {
   await openApp(page);
-  const anchor = [700, 500];
-  const [x, y] = await imgToPage(page, anchor);
+  // the browser reports whole-pixel mouse positions, so anchor on one
+  const [x, y] = (await imgToPage(page, [700, 500])).map(Math.round);
+  const anchor = await page.evaluate(([px, py]) => {
+    const { S } = window.__lmk, r = document.querySelector('#cv').getBoundingClientRect();
+    return [(px - r.left - S.view.ox) / S.view.s, (py - r.top - S.view.oy) / S.view.s];
+  }, [x, y]);
   const s0 = await viewScale(page);
   await page.mouse.move(x, y);
   await page.mouse.wheel(0, -400);

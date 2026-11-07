@@ -205,3 +205,32 @@ test('combining hand-ins: summary per student, shared specimens, refused and ski
   assert.deepEqual(r.ids, ['FISH_01_ana', 'FISH_02_ana', 'FISH_02_ben', 'FISH_03_ben']);
   assert.match(C.toTPS(r.states, r.ids), /ID=FISH_02_ben\n/);
 });
+
+test('galleryView: a square crop centred on the landmark, the same relative size on every specimen', () => {
+  const s = makeState(); // 1000 × 800 image
+  C.placeLm(s, 'LM01', [500, 400]);
+  assert.deepEqual(C.galleryView(s, { kind: 'lm', id: 'LM01' }, 0.05), { state: 'placed', box: [450, 350, 100, 100] });
+  s.specimen.image.width = 2000;   // a bigger photo: the crop grows with it
+  assert.deepEqual(C.galleryView(s, { kind: 'lm', id: 'LM01' }, 0.05).box, [400, 300, 200, 200]);
+});
+
+test('galleryView: missing and unplaced landmarks have no crop', () => {
+  const s = makeState();
+  assert.deepEqual(C.galleryView(s, { kind: 'lm', id: 'LM01' }, 0.05), { state: 'todo' });
+  C.setStatus(s, { kind: 'lm', id: 'LM02' }, 'missing');
+  assert.deepEqual(C.galleryView(s, { kind: 'lm', id: 'LM02' }, 0.05), { state: 'missing' });
+  C.placeLm(s, 'LM03', [10, 10]); C.setStatus(s, { kind: 'lm', id: 'LM03' }, 'estimated');
+  assert.equal(C.galleryView(s, { kind: 'lm', id: 'LM03' }, 0.05).state, 'estimated');
+});
+
+test('galleryView: a curve is framed by all its points', () => {
+  const s = makeState();
+  C.placeLm(s, 'LM02', [100, 100]); C.placeLm(s, 'LM03', [500, 100]);
+  C.ensureCurve(s, 'C01').control_points.push({ position: [300, 200] });
+  C.recomputeCurves(s);
+  const { state, box } = C.galleryView(s, { kind: 'curve', id: 'C01' }, 0);
+  assert.equal(state, 'placed');
+  const side = 400 * 1.15;
+  assert.deepEqual(box.map(v => Math.round(v * 1000) / 1000), [300 - side / 2, 150 - side / 2, side, side].map(v => Math.round(v * 1000) / 1000));
+  assert.deepEqual(C.galleryView(makeState(), { kind: 'curve', id: 'C01' }, 0.05), { state: 'todo' });
+});

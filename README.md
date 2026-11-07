@@ -8,7 +8,7 @@ It is the 2D companion of a 3D landmarking app that uses the same file format.
 
 Open the hosted version (GitHub Pages, once enabled), or download `landmarker2d.html` from the site or from a build and open it in any modern browser.
 
-1. **Open image** (JPG, PNG or WebP). The specimen ID is taken from the file name.
+1. **Open images** (JPG, PNG or WebP; one or several). The specimen ID is taken from the file name.
 2. Set up the template in the **Template** tab (it works like the one in the 3D app):
    - name the template, add landmarks one at a time or paste a list, rename them, write where to place each one, set bilateral pairs and change the order;
    - add curves: choose the landmarks they start and end on (or a closed loop), the number of semilandmarks, and straight or smooth lines between clicks;
@@ -17,8 +17,9 @@ Open the hosted version (GitHub Pages, once enabled), or download `landmarker2d.
    IDs (`LM01`, `C01`) lock once a landmark or curve has data; names can always change. Every edit can be undone.
 3. Click to place the selected landmark; the next one is selected automatically. For a curve, click along it in order: the ends snap to the `start`/`end` landmarks and `n` semilandmarks are spaced at equal arc length.
 4. **Several specimens:** open several images at once (or **+ Add images** in the strip under the image). Each becomes a specimen in the same set, with one shared template. The strip shows each specimen's progress (red until every landmark is done, then green); click a thumbnail or press `[` / `]` to move between them.
-5. **Measure scale bar** (two clicks plus the known length) to calibrate.
-6. **Download hand-in** gives one zip with a `.lmk.json` per specimen plus all specimens as one TPS and one CSV file; it asks for the student's name first. **Open files** with that zip resumes the set (then open the images again). **Save .lmk.json** saves just the current specimen; **Export TPS** / **Export CSV** export the whole set.
+5. **Compare** (or `G`) switches the strip under the image to the selected landmark on every specimen: a close-up crop of each, the same size for all, so a landmark placed inconsistently stands out. **Closer** / **Wider** change the crop size; a curve is shown whole. Click a crop to open that specimen with the landmark still selected and fix it. While comparing, placing a landmark doesn't move on to the next one.
+6. **Measure scale bar** (two clicks plus the known length) to calibrate.
+7. **Download hand-in** gives one zip with a `.lmk.json` per specimen plus all specimens as one TPS and one CSV file; it asks for the student's name first. **Open files** with that zip resumes the set (then open the images again). **Save .lmk.json** saves just the current specimen; **Export TPS** / **Export CSV** export the whole set.
 
 **Instructors:** Specimen tab → **Combine hand-ins…** takes the zips from several students and gives one combined TPS and CSV. Files made with a different template are left out with a reason. When a specimen was landmarked by more than one student, every ID gets the student's name added (`FISH_02_ana`); the CSV also has separate `specimen_id`, `replicate` and `operator` columns.
 
@@ -30,6 +31,7 @@ Work is also kept in the browser, keyed to the image's checksum: reopening the s
 | Pan, zoom | Drag empty space, mouse wheel, pinch on touch screens |
 | Next unfinished | `N` |
 | Previous / next specimen | `[` / `]` |
+| Compare across specimens | `G` |
 | Estimated, missing | `E`, `M` |
 | Clear | `Delete` (`Backspace` removes the last curve point) |
 | Nudge | Arrow keys (0.25 px, 1 px with Shift) |

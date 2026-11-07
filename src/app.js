@@ -39,14 +39,14 @@ function resetSet(template){
 const templateIsBlank = () => !(set.template.landmarks || []).length && !(set.template.curves || []).length;
 const hasData = r => r.landmarks.length > 0 || r.curves.length > 0;
 /** Show another specimen. */
-function switchTo(rec){
+function switchTo(rec, keepSel){
   if (!rec) return;
   S.tool = 'place'; S.scaleDraft = []; S.scaleManual = false; removing = false;
   cur = rec; S.hover = null;
   if (!cur.view){ cur.view = { s:1, ox:0, oy:0 }; fit(); }
   // start each specimen at its first unfinished item (Landmark 1 on a new one);
   // nothing is selected on a finished specimen, so a stray click can't move a point
-  S.sel = C.nextTodo(S, null);
+  if (!keepSel) S.sel = C.nextTodo(S, null);
   setFields(); C.recomputeCurves(S); renderSide(); draw();
 }
 function stepSpecimen(d){
@@ -150,7 +150,8 @@ function handleClick(p){
     S.sel = { kind:'lm', id:e.id };
   } else if (S.sel.kind === 'lm'){
     C.placeLm(S, S.sel.id, p);
-    if (tLm(S.sel.id)){ const nx = nextTodo(); if (nx) S.sel = nx; }
+    // move on to the next landmark, except in the compare view, which stays on the landmark being reviewed
+    if (tLm(S.sel.id) && !gal.open){ const nx = nextTodo(); if (nx) S.sel = nx; }
   } else {
     const c = C.ensureCurve(S, S.sel.id);
     if (c.status === 'missing') c.status = 'placed';
@@ -411,6 +412,7 @@ function renderSide(){
 
   renderDetail();
   renderStrip();
+  renderGallery();
   renderSpecimenActions();
   const i = set.specimens.indexOf(cur);
   $('#sSpec').innerHTML = set.specimens.length > 1 ? `<b>${esc(S.specimen.id)}</b> · ${i + 1} of ${set.specimens.length}` : '';
@@ -448,6 +450,112 @@ $('#strip').addEventListener('click', e => {
   if (b.dataset.act === 'add-images'){ $('#fImg').click(); return; }
   const rec = set.specimens.find(r => String(r.uid) === b.dataset.uid);
   if (rec && rec !== cur) switchTo(rec);
+});
+
+/* ---------- compare view: the selected item on every specimen ---------- */
+const GAL_FRACS = [0.02, 0.035, 0.06, 0.1, 0.16];   // crop half-size as a share of the image's longer side
+const gal = { open:false, zoom:2, raf:0 };
+function setView(compare){
+  gal.open = compare;
+  $('#vSpecimens').classList.toggle('on', !compare); $('#vSpecimens').setAttribute('aria-pressed', String(!compare));
+  $('#vCompare').classList.toggle('on', compare); $('#vCompare').setAttribute('aria-pressed', String(compare));
+  $('#strip').hidden = compare; $('#gallery').hidden = !compare; $('#galZoom').hidden = !compare;
+  renderGallery();
+}
+const STATE_TEXT = { placed:'placed', estimated:'estimated', missing:'missing', todo:'not placed', partial:'not finished' };
+function renderGallery(){
+  if (!gal.open){ $('#galHead').textContent = ''; return; }
+  if (gal.raf) return;
+  gal.raf = requestAnimationFrame(() => { gal.raf = 0; drawGallery(); });
+}
+function drawGallery(){
+  const el = $('#gallery'), head = $('#galHead');
+  const sel = S.sel && S.sel.kind !== 'adhoc' && (S.sel.kind === 'lm' ? tLm(S.sel.id) || lmEntry(S.sel.id) : tCurve(S.sel.id)) ? S.sel : null;
+  $('#galCloser').disabled = gal.zoom <= 0; $('#galWider').disabled = gal.zoom >= GAL_FRACS.length - 1;
+  if (!sel){
+    head.textContent = '';
+    el.innerHTML = `<p class="gal-msg">Select a landmark or curve to see it on every specimen.</p>`;
+    return;
+  }
+  const def = sel.kind === 'lm' ? (tLm(sel.id) || lmEntry(sel.id)) : tCurve(sel.id);
+  const name = def.name || def.label || '';
+  head.innerHTML = `<span class="mono">${esc(sel.id)}</span> <b>${esc(name)}</b> on ${plural(set.specimens.length, 'specimen')}`;
+  if (set.specimens.length < 2){
+    el.innerHTML = `<p class="gal-msg">Open more images to compare ${esc(sel.id)} across specimens.</p>`;
+    return;
+  }
+  const frac = GAL_FRACS[gal.zoom];
+  const key = set.specimens.map(r => r.uid).join(',');
+  if (el.dataset.key !== key){
+    el.dataset.key = key;
+    el.innerHTML = set.specimens.map(r => `<button type="button" class="gtile" data-uid="${r.uid}"><canvas width="264" height="264"></canvas><span class="gempty" hidden></span><span class="gname"><span></span><span></span></span></button>`).join('');
+  }
+  for (const r of set.specimens){
+    const b = el.querySelector(`[data-uid="${r.uid}"]`);
+    const v = C.galleryView(r, sel, frac);
+    const [nm, st] = b.querySelectorAll('.gname span');
+    nm.textContent = r.specimen.id;
+    st.textContent = STATE_TEXT[v.state] || v.state; st.className = 'st-' + v.state;
+    b.setAttribute('aria-current', r === cur ? 'true' : 'false');
+    b.setAttribute('aria-label', `${r.specimen.id}: ${sel.id} ${STATE_TEXT[v.state] || v.state}`);
+    b.dataset.state = v.state;
+    b.dataset.box = v.box ? v.box.map(x => r6(x)).join(',') : '';
+    const empty = b.querySelector('.gempty'), cvs = b.querySelector('canvas');
+    const msg = !r.img ? 'image not open' : !v.box ? (v.state === 'missing' ? 'marked missing' : v.state === 'partial' ? 'curve not finished' : 'not placed yet') : '';
+    empty.hidden = !msg; empty.textContent = msg;
+    drawTile(cvs.getContext('2d'), r, sel, msg ? null : v.box);
+  }
+}
+/** One gallery tile: the crop, the other landmarks as dots, the item itself on top. */
+function drawTile(g, r, sel, box){
+  const N = 264;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = '#0B0E12'; g.fillRect(0, 0, N, N);
+  if (!box) return;
+  const [bx, by, bw] = box, k = N / bw;
+  const W = r.img.width, H = r.img.height;
+  const x0 = Math.max(0, bx), y0 = Math.max(0, by), x1 = Math.min(W, bx + bw), y1 = Math.min(H, by + bw);
+  g.imageSmoothingEnabled = k < 3;
+  if (x1 > x0 && y1 > y0) g.drawImage(r.img, x0, y0, x1 - x0, y1 - y0, (x0 - bx) * k, (y0 - by) * k, (x1 - x0) * k, (y1 - y0) * k);
+  const mp = p => [(p[0] - bx) * k, (p[1] - by) * k];
+  for (const e of r.landmarks){
+    if (!e.position || e.status === 'missing' || (sel.kind === 'lm' && e.id === sel.id)) continue;
+    const [x, y] = mp(e.position);
+    g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fillStyle = 'rgba(0,0,0,.6)'; g.fill();
+    g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fillStyle = 'rgba(255,194,61,.9)'; g.fill();
+  }
+  if (sel.kind === 'lm'){
+    const e = r.landmarks.find(x => x.id === sel.id);
+    const [x, y] = mp(e.position);
+    // the tile canvas is drawn at twice its displayed size, so marks are doubled
+    const ring = (w, color, dash) => { g.strokeStyle = color; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); g.arc(x, y, 20, 0, Math.PI * 2); g.stroke(); };
+    ring(8, 'rgba(0,0,0,.7)'); ring(4, COL.sel, e.status === 'estimated' ? [10, 8] : null); g.setLineDash([]);
+    g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fillStyle = COL.sel; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 6;
+    const ticks = () => { g.beginPath(); g.moveTo(x - 44, y); g.lineTo(x - 26, y); g.moveTo(x + 26, y); g.lineTo(x + 44, y);
+      g.moveTo(x, y - 44); g.lineTo(x, y - 26); g.moveTo(x, y + 26); g.lineTo(x, y + 44); g.stroke(); };
+    ticks(); g.strokeStyle = COL.sel; g.lineWidth = 3; ticks();
+  } else {
+    const c = r.curves.find(x => x.id === sel.id), d = c && c._geom && c._geom.dense;
+    if (d && d.length > 1){
+      g.beginPath(); d.forEach((p, i) => { const q = mp(p); i ? g.lineTo(...q) : g.moveTo(...q); });
+      g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 7; g.stroke(); g.strokeStyle = COL.sel; g.lineWidth = 3.5; g.stroke();
+    }
+    for (const p of (c && c.points) || []){
+      const [x, y] = mp(p.position);
+      g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.fillStyle = 'rgba(0,0,0,.75)'; g.fill();
+      g.beginPath(); g.arc(x, y, 5.5, 0, Math.PI * 2); g.fillStyle = COL.curve; g.fill();
+    }
+  }
+}
+$('#vSpecimens').onclick = () => setView(false);
+$('#vCompare').onclick = () => setView(true);
+$('#galCloser').onclick = () => { gal.zoom = Math.max(0, gal.zoom - 1); renderGallery(); };
+$('#galWider').onclick = () => { gal.zoom = Math.min(GAL_FRACS.length - 1, gal.zoom + 1); renderGallery(); };
+$('#gallery').addEventListener('click', e => {
+  const b = e.target.closest('.gtile'); if (!b) return;
+  const rec = set.specimens.find(r => String(r.uid) === b.dataset.uid);
+  if (rec && rec !== cur) switchTo(rec, true);   // keep the landmark selected, ready to fix
 });
 
 function renderSpecimenActions(){
@@ -992,6 +1100,7 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === 'escape'){ if (S.tool !== 'place') cancelScale(); return; }
   if (e.key === '[' || e.key === ']'){ stepSpecimen(e.key === ']' ? 1 : -1); return; }
+  if (k === 'g'){ setView(!gal.open); return; }
   if (k === 'n'){ e.preventDefault(); const n = nextTodo(); if (n){ S.sel = n; renderSide(); draw(); } else toast('Every template point is done'); return; }
   if (k === 'm'){ setStatus('missing'); return; }
   if (k === 'e'){ if (S.sel && S.sel.kind === 'lm'){ const ent = lmEntry(S.sel.id); setStatus(ent && ent.status === 'estimated' ? 'placed' : 'estimated'); } else setStatus('estimated'); return; }

@@ -818,6 +818,35 @@
   /** The specimen in the set with the same image (by checksum), if any. */
   const findBySha = (set, sha) => (sha ? set.specimens.find(st => st.specimen.image && st.specimen.image.sha256 === sha) : undefined);
 
+  /* ---------- gallery ---------- */
+  /**
+   * What the gallery shows for one item (sel = { kind, id }) on one
+   * specimen: { state, box } where box = [x, y, w, h] in image pixels, or
+   * no box when there is nothing to show (not placed, missing).
+   * A landmark's crop is a square centred on it, half-size = frac × the
+   * image's longer side, so every specimen is cropped alike. A curve's crop
+   * is a square around its points, padded.
+   */
+  function galleryView(s, sel, frac) {
+    const im = s.specimen.image || {};
+    const big = Math.max(im.width || 0, im.height || 0) || 1;
+    const state = itemState(s, sel);
+    if (sel.kind === 'lm') {
+      const e = lmEntry(s, sel.id);
+      if (!e || !e.position || e.status === 'missing') return { state };
+      const half = frac * big;
+      return { state, box: [e.position[0] - half, e.position[1] - half, 2 * half, 2 * half] };
+    }
+    const c = curveEntry(s, sel.id);
+    const pts = c ? [...(c._geom && c._geom.dense && c._geom.dense.length ? c._geom.dense : []),
+      ...(c.points || []).map(p => p.position), ...(c.control_points || []).map(p => p.position)] : [];
+    if (!c || c.status === 'missing' || pts.length < 2) return { state };
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const side = Math.max(x1 - x0, y1 - y0) * 1.15 + frac * big;
+    return { state, box: [(x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side] };
+  }
+
   /* ---------- hand-in and combining ---------- */
   /** File name for a specimen's .lmk.json: <id>.lmk.json, or <id>_r<n>.lmk.json for later replicates. */
   const docFileName = st => `${safeName(st.specimen.id) || 'specimen'}${replicateOf(st) > 1 ? '_r' + replicateOf(st) : ''}.lmk.json`;
@@ -894,7 +923,7 @@
     sortedEntries, buildDoc, parseDoc, sniffJson,
     exportRows, notDoneCount, toTPS, toCSV, CSV_HEADER, exportIds, replicateOf, operatorOf, safeName,
     members, specimensWith, progress, templateDifference,
-    newSet, joinSet, findBySha,
+    newSet, joinSet, findBySha, galleryView,
     crc32, zipFiles, unzipFiles, docFileName, handInFiles, combineEntries,
   };
 });
