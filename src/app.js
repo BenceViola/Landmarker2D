@@ -6,7 +6,23 @@
 'use strict';
 const C = window.LmkCore;
 const $ = s => document.querySelector(s);
-const COL = { lm:'#FFC23D', sel:'#FF4FB0', adhoc:'#FFFFFF', curve:'#46D2FF', bar:'#FFFFFF' };
+const COL = { sel:'#FF4FB0', adhoc:'#FFFFFF', curve:'#46D2FF', bar:'#FFFFFF' };
+
+/* Display settings (Specimen tab → Display), kept in this browser. */
+const DISPLAY_DEFAULTS = { lmColor:'#FFC23D', labelColor:null, labelSize:11 };
+const HEX = /^#[0-9a-f]{6}$/i;
+const display = (() => {
+  const d = { ...DISPLAY_DEFAULTS };
+  try {
+    const saved = JSON.parse(localStorage.getItem('lmk2d:display') || '{}');
+    if (HEX.test(saved.lmColor)) d.lmColor = saved.lmColor;
+    if (HEX.test(saved.labelColor)) d.labelColor = saved.labelColor;
+    if (Number.isFinite(saved.labelSize)) d.labelSize = Math.min(28, Math.max(8, Math.round(saved.labelSize)));
+  } catch {}
+  return d;
+})();
+Object.defineProperty(COL, 'lm', { get: () => display.lmColor });
+const labelColor = () => display.labelColor || display.lmColor;
 
 const stage = $('#stage'), cv = $('#cv'), ctx = cv.getContext('2d');
 let dpr = 1;
@@ -197,8 +213,10 @@ function ring(x, y, r, color, dashed){
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
 }
 function label(x, y, text, color){
-  ctx.font = '600 11px "IBM Plex Mono", ui-monospace, monospace';
-  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.fillStyle = color;
+  ctx.font = `600 ${display.labelSize}px "IBM Plex Mono", ui-monospace, monospace`;
+  ctx.lineWidth = Math.max(3, display.labelSize / 4);
+  ctx.lineJoin = 'round';   // sharp joins on the dark outline make spikes on letters like M
+  ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.fillStyle = color;
   ctx.strokeText(text, x, y); ctx.fillText(text, x, y);
 }
 function marker(p, o){
@@ -212,7 +230,7 @@ function marker(p, o){
     ctx.beginPath(); ctx.moveTo(x - r - 6, y); ctx.lineTo(x - r - 1, y); ctx.moveTo(x + r + 1, y); ctx.lineTo(x + r + 6, y);
     ctx.moveTo(x, y - r - 6); ctx.lineTo(x, y - r - 1); ctx.moveTo(x, y + r + 1); ctx.lineTo(x, y + r + 6); ctx.stroke();
   }
-  if (S.labels && o.text) label(x + r + 5, y - r - 2, o.text, color);
+  if (S.labels && o.text) label(x + r + 5, y - r - 2, o.text, o.sel ? COL.sel : o.adhoc ? COL.adhoc : labelColor());
 }
 function drawScaleBar(pts, text){
   const [a, b] = pts.map(toScr);
@@ -530,7 +548,7 @@ function drawTile(g, r, sel, box){
     if (!e.position || e.status === 'missing' || (sel.kind === 'lm' && e.id === sel.id)) continue;
     const [x, y] = mp(e.position);
     g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fillStyle = 'rgba(0,0,0,.6)'; g.fill();
-    g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fillStyle = 'rgba(255,194,61,.9)'; g.fill();
+    g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fillStyle = COL.lm; g.fill();
   }
   if (sel.kind === 'lm'){
     const e = r.landmarks.find(x => x.id === sel.id);
@@ -1270,6 +1288,45 @@ function loadSample(){
   c.toBlob(async b => { if (b && S.isSample){ S.specimen.image.sha256 = await C.sha256Hex(await b.arrayBuffer()); renderSide(); } }, 'image/png');
 }
 
+/* ---------- display settings ---------- */
+const PRESETS = [['#FFC23D', 'Amber'], ['#22D3EE', 'Cyan'], ['#A855F7', 'Violet'], ['#A3E635', 'Lime'], ['#FFFFFF', 'White'], ['#FF3B30', 'Red'], ['#3B82F6', 'Blue']];
+function swatches(target, current){
+  return PRESETS.map(([c, name]) => `<button type="button" class="swatch" data-act="swatch" data-target="${target}" data-color="${c}" style="background:${c}" aria-label="${name}" title="${name}" aria-pressed="${current.toUpperCase() === c}"></button>`).join('');
+}
+function renderDisplay(){
+  $('#lmSwatches').innerHTML = swatches('lm', display.lmColor) + `<input type="color" id="setLmColor" value="${display.lmColor}" aria-label="Other landmark colour" title="Other colour">`;
+  $('#setLabelSame').checked = !display.labelColor;
+  $('#labelSwatches').hidden = !display.labelColor;
+  $('#labelSwatches').innerHTML = swatches('label', labelColor()) + `<input type="color" id="setLabelColor" value="${labelColor()}" aria-label="Other label colour" title="Other colour">`;
+  $('#setLabelSize').value = display.labelSize;
+  $('#setLabelSizeOut').textContent = display.labelSize + ' px';
+}
+function saveDisplay(rerender = true){
+  try { localStorage.setItem('lmk2d:display', JSON.stringify(display)); } catch {}
+  if (rerender) renderDisplay();
+  draw(); renderGallery();
+}
+$('#dispSec').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  if (b.dataset.act === 'swatch'){
+    if (b.dataset.target === 'lm') display.lmColor = b.dataset.color; else display.labelColor = b.dataset.color;
+    saveDisplay();
+  } else if (b.dataset.act === 'display-reset'){
+    Object.assign(display, DISPLAY_DEFAULTS); saveDisplay();
+  }
+});
+$('#dispSec').addEventListener('input', e => {   // live while dragging the slider or picking a colour
+  const id = e.target.id;
+  if (id === 'setLmColor' && HEX.test(e.target.value)){ display.lmColor = e.target.value; saveDisplay(false); }
+  else if (id === 'setLabelColor' && HEX.test(e.target.value)){ display.labelColor = e.target.value; saveDisplay(false); }
+  else if (id === 'setLabelSize'){ display.labelSize = Number(e.target.value); $('#setLabelSizeOut').textContent = display.labelSize + ' px'; saveDisplay(false); }
+});
+$('#dispSec').addEventListener('change', e => {
+  if (e.target.id === 'setLabelSame'){ display.labelColor = e.target.checked ? null : display.lmColor; saveDisplay(); }
+  else if (/^set(Lm|Label)Color$/.test(e.target.id)) renderDisplay();
+});
+window.__lmk.display = display;
+
 /* ---------- side panel tabs ---------- */
 const tabs = [...document.querySelectorAll('#side [role="tab"]')];
 function selectTab(tab){
@@ -1292,6 +1349,7 @@ $('#side [role="tablist"]').addEventListener('keydown', e => {
 /* ---------- boot ---------- */
 try { const op = localStorage.getItem('lmk2d:operator'); if (op) $('#opName').value = op; } catch {}
 new ResizeObserver(() => resize()).observe(stage);
+renderDisplay();
 loadSample();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 document.documentElement.dataset.ready = '1';

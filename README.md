@@ -22,6 +22,8 @@ Open the hosted version (GitHub Pages, once enabled), or download `landmarker2d.
 7. **Measure scale bar** (two clicks plus the known length) to calibrate.
 8. **Download hand-in** gives one zip with a `.lmk.json` per specimen plus all specimens as one TPS and one CSV file; it asks for the student's name first. **Open files** with that zip resumes the set (then open the images again). **Save .lmk.json** saves just the current specimen; **Export TPS** / **Export CSV** export the whole set.
 
+**Display settings** (Specimen tab → Display): landmark colour (presets or any colour), label colour (same as the landmarks, or its own) and label size. They are kept in the browser; the selected landmark always shows in pink.
+
 **Instructors:** Specimen tab → **Combine hand-ins…** takes the zips from several students and gives one combined TPS and CSV. Files made with a different template are left out with a reason. When a specimen was landmarked by more than one student, every ID gets the student's name added (`FISH_02_ana`); the CSV also has separate `specimen_id`, `replicate` and `operator` columns.
 
 Work is also kept in the browser, keyed to the image's checksum: reopening the same image restores unsaved work.

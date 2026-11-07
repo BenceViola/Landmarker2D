@@ -127,6 +127,21 @@
           <p class="hint">Combine the zips your students handed in into one TPS and CSV file. Everything stays on this computer.</p>
           <div class="inline"><button class="btn sm" type="button" data-act="combine">Combine hand-ins…</button></div>
         </div>
+        <div class="sec" id="dispSec">
+          <div class="eyebrow">Display</div>
+          <div class="field-stack"><span id="lmColLabel">Landmark colour</span>
+            <div class="swatches" id="lmSwatches" role="group" aria-labelledby="lmColLabel"></div>
+          </div>
+          <div class="field-stack"><span id="labelColLabel">Label colour</span>
+            <label class="check"><input type="checkbox" id="setLabelSame" checked> Same as the landmarks</label>
+            <div class="swatches" id="labelSwatches" role="group" aria-labelledby="labelColLabel" hidden></div>
+          </div>
+          <label class="field-stack" for="setLabelSize">Label size
+            <span class="range-row"><input type="range" id="setLabelSize" min="8" max="28" step="1" value="11"><output id="setLabelSizeOut" for="setLabelSize">11 px</output></span>
+          </label>
+          <div class="inline"><button class="btn sm" type="button" data-act="display-reset">Reset to defaults</button></div>
+          <p class="hint">Saved in this browser. The selected landmark always shows in pink.</p>
+        </div>
       </div>
     </aside>
   </main>

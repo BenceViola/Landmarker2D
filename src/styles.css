@@ -85,6 +85,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 .cb-list b{color:var(--ink);font-weight:500}
 #cbResult{display:flex;flex-direction:column;gap:8px}
 .rep-list{display:flex;flex-wrap:wrap;gap:6px}
+.swatches{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+.swatch{width:24px;height:24px;padding:0;border-radius:50%;border:1px solid rgba(0,0,0,.35);box-shadow:inset 0 0 0 1px rgba(255,255,255,.25);cursor:pointer}
+.swatch[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:2px}
+.swatch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.swatches input[type=color]{width:34px;height:26px;padding:1px 2px;border:1px solid var(--line);border-radius:5px;background:var(--bg);cursor:pointer}
+.range-row{display:flex;align-items:center;gap:10px}
+.range-row input{flex:1;min-width:0;accent-color:var(--accent)}
+.range-row output{font:12px var(--f-mono);color:var(--ink);min-width:40px;text-align:right}
 .rep-body{display:flex;flex-direction:column;gap:8px}
 .rep-body p{margin:0;max-width:68ch}
 .rep-table{width:100%}
