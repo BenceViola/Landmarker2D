@@ -67,6 +67,7 @@ tests/unit/          node:test suites for core.js
 tests/e2e/           Playwright tests driving the real page
 scripts/serve.mjs    static server for npm start and the browser tests
 scripts/build.mjs    single-file build
+docs/                landmark-json format specification
 ```
 
 Plain JavaScript with no build step and no runtime dependencies, so it can be hosted as static files.
@@ -78,6 +79,10 @@ Plain JavaScript with no build step and no runtime dependencies, so it can be ho
 
 ## File format
 
-`landmark-json` version 0.2, 2D section: one file per image, `specimen.image` (`file`, `sha256`, `width`, `height`, optional `scale`), template with `dimensions: 2`, statuses `placed` / `estimated` / `missing`. Fields the app doesn't know are kept when a file is saved again.
+The full specification is in [docs/landmark-json-spec.md](docs/landmark-json-spec.md). This app implements `landmark-json` version 0.2, 2D section: one file per image, `specimen.image` (`file`, `sha256`, `width`, `height`, optional `scale`), template with `dimensions: 2`, statuses `placed` / `estimated` / `missing`. Fields the app doesn't know are kept when a file is saved again.
 
 Not yet supported: templates referenced by `ref` instead of embedded, the geomorph curve-sliders file, TIFF images.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).

@@ -10,6 +10,8 @@ Browser app for 2D landmarking on images. Plain JavaScript, no framework, no bui
 
 ## File format rules (landmark-json 0.2, 2D)
 
+The specification is `docs/landmark-json-spec.md` (a copy of the shared spec also used by the 3D app). Follow it; if a change needs the format to change, say so rather than diverging silently.
+
 - Positions are raw image pixels, origin top-left, y down, pixel centres at .5, never pre-scaled. Scale is applied only at export.
 - Unknown fields are preserved on save (`state.raw` is the base of `buildDoc`). Fields starting with `_` are private and never saved.
 - Statuses: `placed`, `estimated`, `missing`. No entry means "not yet done", which is different from `missing`.
