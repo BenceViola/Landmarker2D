@@ -87,9 +87,19 @@
   const isDone = (s, it) => ['placed', 'estimated', 'missing'].includes(itemState(s, it));
 
   /** Next item after `sel` that is not done, wrapping around; null when all are done. */
-  function nextTodo(s, sel) {
-    const a = items(s);
+  /**
+   * Next item after `sel` that is not done, wrapping around; null when all are done.
+   * `order` (ids) changes the sequence, e.g. a shuffled order for a blind replicate;
+   * items it doesn't list keep their place after the listed ones.
+   */
+  function nextTodo(s, sel, order) {
+    let a = items(s);
     if (!a.length) return null;
+    if (order && order.length) {
+      const rank = new Map(order.map((id, i) => [id, i]));
+      const r = it => (rank.has(it.id) ? rank.get(it.id) : 1e6);
+      a = a.slice().sort((x, y) => r(x) - r(y));
+    }
     const i = sel ? a.findIndex(x => x.kind === sel.kind && x.id === sel.id) : -1;
     for (let k = 1; k <= a.length; k++) {
       const it = a[(i + k + a.length) % a.length];
@@ -567,7 +577,8 @@
     const d = clone(s.raw || {});
     d.format = 'landmark-json';
     // Re-saving a file from a newer minor version keeps its version, since its extra fields are kept too.
-    d.version = newerVersion(d.version, FORMAT_VERSION);
+    // a replicate after the first uses specimen.replicate, which needs format 0.3
+    d.version = newerVersion(d.version, replicateOf(s) > 1 ? '0.3.0' : FORMAT_VERSION);
     const sp = clone(s.specimen);
     delete sp.mesh;
     if (opts.specimenId !== undefined) sp.id = opts.specimenId;
@@ -818,6 +829,80 @@
   /** The specimen in the set with the same image (by checksum), if any. */
   const findBySha = (set, sha) => (sha ? set.specimens.find(st => st.specimen.image && st.specimen.image.sha256 === sha) : undefined);
 
+  /* ---------- replicates ---------- */
+  /** The template's landmarks in random order (curves keep their place after them), for a blind replicate. */
+  function shuffledOrder(s, rand) {
+    rand = rand || Math.random;
+    const ids = (s.template.landmarks || []).map(l => l.id);
+    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    return ids;
+  }
+  /** Replicates of one specimen: same specimen ID and same image. */
+  const sameSpecimen = (a, b) => a.specimen.id === b.specimen.id
+    && ((a.specimen.image && a.specimen.image.sha256) || '') === ((b.specimen.image && b.specimen.image.sha256) || '');
+  /** The next free replicate number for a specimen. */
+  const nextReplicate = (states, st) => Math.max(0, ...states.filter(x => sameSpecimen(x, st)).map(replicateOf)) + 1;
+
+  /**
+   * How far apart replicates of the same specimen landed, per landmark and
+   * per curve (over its semilandmarks), over every pair of replicates.
+   * Distances are in the scale's units when every replicated specimen has a
+   * scale in the same units, otherwise in pixels. Rows whose mean distance is
+   * more than twice the median of all rows are flagged.
+   */
+  function repeatability(states) {
+    const groups = new Map();
+    for (const st of states) {
+      const key = JSON.stringify([st.specimen.id, (st.specimen.image && st.specimen.image.sha256) || '']);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(st);
+    }
+    const reps = [...groups.values()].filter(g => g.length > 1);
+    const all = reps.flat();
+    const scaled = all.length > 0 && all.every(st => scaleOf(st)) && new Set(all.map(st => scaleOf(st).units)).size === 1;
+    const units = scaled ? scaleOf(all[0]).units : 'px';
+    const k = st => (scaled ? scaleOf(st).value : 1);
+    const T = states.length ? states[0].template : emptyTemplate();
+    const pairsOf = list => { const out = []; for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) out.push([list[i], list[j]]); return out; };
+    const summarise = (row, d, specimens) => Object.assign(row, {
+      specimens, pairs: d.length,
+      mean: d.length ? d.reduce((a, b) => a + b, 0) / d.length : null,
+      max: d.length ? Math.max(...d) : null,
+    });
+    const rows = [];
+    for (const lm of T.landmarks || []) {
+      const d = []; let specimens = 0;
+      for (const g of reps) {
+        const pts = g.map(st => {
+          const e = lmEntry(st, lm.id);
+          return e && e.position && e.status !== 'missing' ? [e.position[0] * k(st), e.position[1] * k(st)] : null;
+        }).filter(Boolean);
+        if (pts.length < 2) continue;
+        specimens++;
+        for (const [a, b] of pairsOf(pts)) d.push(dist(a, b));
+      }
+      rows.push(summarise({ kind: 'lm', id: lm.id, name: lm.name }, d, specimens));
+    }
+    for (const c of T.curves || []) {
+      const n = c.n_points != null ? c.n_points : 10;
+      const d = []; let specimens = 0;
+      for (const g of reps) {
+        const lines = g.map(st => {
+          const e = curveEntry(st, c.id);
+          return e && e.status !== 'missing' && e.points && e.points.length === n ? e.points.map(p => [p.position[0] * k(st), p.position[1] * k(st)]) : null;
+        }).filter(Boolean);
+        if (lines.length < 2) continue;
+        specimens++;
+        for (const [a, b] of pairsOf(lines)) for (let i = 0; i < n; i++) d.push(dist(a[i], b[i]));
+      }
+      rows.push(summarise({ kind: 'curve', id: c.id, name: c.name }, d, specimens));
+    }
+    const means = rows.filter(r => r.pairs).map(r => r.mean).sort((a, b) => a - b);
+    const median = means.length ? (means.length % 2 ? means[(means.length - 1) / 2] : (means[means.length / 2 - 1] + means[means.length / 2]) / 2) : null;
+    for (const r of rows) r.flag = !!(r.pairs && median > 0 && r.mean > 2 * median);
+    return { rows, units, median, specimens: reps.map(g => ({ id: g[0].specimen.id, replicates: g.length })) };
+  }
+
   /* ---------- gallery ---------- */
   /**
    * What the gallery shows for one item (sel = { kind, id }) on one
@@ -923,7 +1008,7 @@
     sortedEntries, buildDoc, parseDoc, sniffJson,
     exportRows, notDoneCount, toTPS, toCSV, CSV_HEADER, exportIds, replicateOf, operatorOf, safeName,
     members, specimensWith, progress, templateDifference,
-    newSet, joinSet, findBySha, galleryView,
+    newSet, joinSet, findBySha, galleryView, shuffledOrder, sameSpecimen, nextReplicate, repeatability,
     crc32, zipFiles, unzipFiles, docFileName, handInFiles, combineEntries,
   };
 });

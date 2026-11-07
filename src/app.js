@@ -18,16 +18,21 @@ const set = C.newSet();
 let cur = null;
 const S = { sel:null, tool:'place', scaleDraft:[], scaleManual:false, labels:true, loupe:true,
   hover:null, hoverScr:null, pointerType:'mouse' };
-for (const k of ['raw', 'specimen', 'landmarks', 'curves', 'provenance', 'img', 'imgSha', 'view', 'isSample', 'warn'])
+for (const k of ['raw', 'specimen', 'landmarks', 'curves', 'provenance', 'img', 'imgSha', 'view', 'isSample', 'warn', 'order'])
   Object.defineProperty(S, k, { get: () => cur[k], set: v => { cur[k] = v; }, enumerable: true });
 Object.defineProperty(S, 'template', { get: () => set.template, set: v => { set.template = v; }, enumerable: true });
 Object.defineProperty(S, '_set', { get: () => set });
 window.__lmk = { S, C, set, get cur(){ return cur; }, get loupe(){ return lastLoupe; } };   // used by the end-to-end tests
 
+/** A specimen's name for the UI: its ID, plus "r2" etc. once it has replicates. */
+function labelOf(r){
+  const n = C.replicateOf(r);
+  return n > 1 || set.specimens.some(x => x !== r && C.sameSpecimen(x, r)) ? `${r.specimen.id} r${n}` : r.specimen.id;
+}
 let uidN = 0;
 function newRecord(fields){
   const rec = Object.assign({ raw:{}, specimen:{ id:'', image:{ file:'', sha256:'', width:0, height:0 } },
-    landmarks:[], curves:[], provenance:{}, img:null, imgSha:null, view:null, isSample:false, warn:null, thumb:null, uid:++uidN }, fields);
+    landmarks:[], curves:[], provenance:{}, img:null, imgSha:null, view:null, isSample:false, warn:null, thumb:null, order:null, uid:++uidN }, fields);
   return C.joinSet(set, rec);
 }
 /** Empty the set (keeping no specimen) and start from a template. */
@@ -46,7 +51,7 @@ function switchTo(rec, keepSel){
   if (!cur.view){ cur.view = { s:1, ox:0, oy:0 }; fit(); }
   // start each specimen at its first unfinished item (Landmark 1 on a new one);
   // nothing is selected on a finished specimen, so a stray click can't move a point
-  if (!keepSel) S.sel = C.nextTodo(S, null);
+  if (!keepSel) S.sel = C.nextTodo(S, null, S.order);
   setFields(); C.recomputeCurves(S); renderSide(); draw();
 }
 function stepSpecimen(d){
@@ -61,7 +66,7 @@ function removeCurrent(){
   const i = set.specimens.indexOf(cur);
   set.specimens.splice(i, 1);
   undoStack.length = 0;
-  toast(`Removed ${cur.specimen.id} from the set. Its work stays saved in this browser.`);
+  toast(`Removed ${labelOf(cur)} from the set. Its work stays saved in this browser.`);
   switchTo(set.specimens[Math.min(i, set.specimens.length - 1)]);
 }
 
@@ -87,7 +92,7 @@ const curveEntry = id => C.curveEntry(S, id);
 const items = () => C.items(S);
 const itemState = it => C.itemState(S, it);
 const isDone = it => C.isDone(S, it);
-const nextTodo = () => C.nextTodo(S, S.sel);
+const nextTodo = () => C.nextTodo(S, S.sel, S.order);
 const adhocEntries = () => C.adhocEntries(S);
 const scaleObj = () => C.scaleOf(S);
 const imgW = () => S.img ? S.img.width : (S.specimen.image?.width || 0);
@@ -121,7 +126,7 @@ function changed(){ fixSel(); for (const r of set.specimens) C.recomputeCurves(r
 function fixSel(){
   if (!S.sel || S.sel.kind === 'adhoc') return;
   const ok = S.sel.kind === 'lm' ? (tLm(S.sel.id) || lmEntry(S.sel.id)) : tCurve(S.sel.id);
-  if (!ok) S.sel = C.nextTodo(S, null);
+  if (!ok) S.sel = C.nextTodo(S, null, S.order);
 }
 /** Run an edit; if it changed the document, record one undo step and redraw. Returns the edit's result. */
 function mutate(fn){
@@ -415,7 +420,7 @@ function renderSide(){
   renderGallery();
   renderSpecimenActions();
   const i = set.specimens.indexOf(cur);
-  $('#sSpec').innerHTML = set.specimens.length > 1 ? `<b>${esc(S.specimen.id)}</b> · ${i + 1} of ${set.specimens.length}` : '';
+  $('#sSpec').innerHTML = set.specimens.length > 1 ? `<b>${esc(labelOf(cur))}</b> · ${i + 1} of ${set.specimens.length}` : '';
   updateHint();
   if (tplEditor.visible) tplEditor.requestRender();
 }
@@ -437,9 +442,9 @@ function renderStrip(){
     const p = C.progress(r), badge = b.querySelector('.badge');
     badge.textContent = `${p.done}/${p.total}`;
     badge.className = 'badge' + (!p.total ? ' empty' : p.done === p.total ? ' ok' : '');
-    b.querySelector('.tname').textContent = r.specimen.id;
-    b.title = `${r.specimen.id}: ${p.done} of ${p.total} done`;
-    b.setAttribute('aria-label', `${r.specimen.id}, ${p.done} of ${p.total} done`);
+    b.querySelector('.tname').textContent = labelOf(r);
+    b.title = `${labelOf(r)}: ${p.done} of ${p.total} done`;
+    b.setAttribute('aria-label', `${labelOf(r)}, ${p.done} of ${p.total} done`);
     b.setAttribute('aria-current', r === cur ? 'true' : 'false');
   }
   const sel = el.querySelector('[aria-current="true"]');
@@ -494,18 +499,21 @@ function drawGallery(){
     const b = el.querySelector(`[data-uid="${r.uid}"]`);
     const v = C.galleryView(r, sel, frac);
     const [nm, st] = b.querySelectorAll('.gname span');
-    nm.textContent = r.specimen.id;
+    nm.textContent = labelOf(r);
     st.textContent = STATE_TEXT[v.state] || v.state; st.className = 'st-' + v.state;
     b.setAttribute('aria-current', r === cur ? 'true' : 'false');
-    b.setAttribute('aria-label', `${r.specimen.id}: ${sel.id} ${STATE_TEXT[v.state] || v.state}`);
+    b.setAttribute('aria-label', `${labelOf(r)}: ${sel.id} ${STATE_TEXT[v.state] || v.state}`);
     b.dataset.state = v.state;
     b.dataset.box = v.box ? v.box.map(x => r6(x)).join(',') : '';
     const empty = b.querySelector('.gempty'), cvs = b.querySelector('canvas');
-    const msg = !r.img ? 'image not open' : !v.box ? (v.state === 'missing' ? 'marked missing' : v.state === 'partial' ? 'curve not finished' : 'not placed yet') : '';
+    const blind = r !== cur && C.sameSpecimen(r, cur) && !curDone();
+    b.dataset.hidden = blind ? 'true' : 'false';
+    const msg = blind ? 'hidden until this replicate is finished' : !r.img ? 'image not open' : !v.box ? (v.state === 'missing' ? 'marked missing' : v.state === 'partial' ? 'curve not finished' : 'not placed yet') : '';
     empty.hidden = !msg; empty.textContent = msg;
     drawTile(cvs.getContext('2d'), r, sel, msg ? null : v.box);
   }
 }
+function curDone(){ const p = C.progress(cur); return p.done === p.total; }
 /** One gallery tile: the crop, the other landmarks as dots, the item itself on top. */
 function drawTile(g, r, sel, box){
   const N = 264;
@@ -558,12 +566,67 @@ $('#gallery').addEventListener('click', e => {
   if (rec && rec !== cur) switchTo(rec, true);   // keep the landmark selected, ready to fix
 });
 
+/* ---------- replicates ---------- */
+let repShuffle = true;
+function landmarkAgain(){
+  if (!cur.img){ toast('Open this specimen’s image first.'); return; }
+  const src = cur, n = C.nextReplicate(set.specimens, src);
+  const rec = newRecord({ specimen:{ id:src.specimen.id, replicate:n, image:C.clone(src.specimen.image) },
+    img:src.img, imgSha:src.imgSha, thumb:src.thumb, isSample:src.isSample });
+  if (repShuffle) rec.order = C.shuffledOrder(rec);
+  // keep replicates of a specimen next to each other in the strip
+  set.specimens.splice(set.specimens.indexOf(rec), 1);
+  let at = -1; set.specimens.forEach((r, i) => { if (C.sameSpecimen(r, src)) at = i; });
+  set.specimens.splice(at + 1, 0, rec);
+  undoStack.length = 0;
+  switchTo(rec);
+  changed();
+  toast(`Replicate ${n} of ${src.specimen.id}: place the landmarks again${repShuffle ? ', in random order' : ''}. Your earlier points stay hidden until you finish.`, 6000);
+}
+function renderReplicates(){
+  const el = $('#repSec');
+  const mine = set.specimens.filter(r => C.sameSpecimen(r, cur));
+  const any = set.specimens.some(r => set.specimens.some(x => x !== r && C.sameSpecimen(x, r)));
+  el.innerHTML = `<div class="eyebrow">Replicates</div>
+    <p class="hint">Landmark a specimen again to check how reliably you place landmarks. The replicate uses the same image; your earlier points stay hidden while you place the new ones.</p>
+    ${mine.length > 1 ? `<div class="rep-list">${mine.map(r => { const p = C.progress(r);
+      return `<button type="button" class="btn sm${r === cur ? ' on' : ''}" data-act="rep-go" data-uid="${r.uid}">r${C.replicateOf(r)} <span class="mono ${p.done === p.total ? 'ok' : 'bad'}">${p.done}/${p.total}</span></button>`; }).join('')}</div>` : ''}
+    <label class="check"><input type="checkbox" id="repShuffle"${repShuffle ? ' checked' : ''}> Place landmarks in random order</label>
+    <div class="inline">
+      <button class="btn sm" type="button" data-act="rep-new"${cur.img ? '' : ' disabled title="Open the image first"'}>Landmark ${esc(cur.specimen.id)} again</button>
+      <button class="btn sm" type="button" data-act="rep-summary"${any ? '' : ' disabled title="Landmark a specimen twice first"'}>Repeatability…</button>
+    </div>`;
+}
+function openRepeatability(){
+  const r = C.repeatability(exportStates());
+  const u = r.units, fmtD = v => v == null ? '—' : (u === 'px' ? v.toFixed(1) : v < 1 ? v.toFixed(3) : v.toFixed(2));
+  const rows = r.rows.filter(x => x.pairs).sort((a, b) => b.mean - a.mean);
+  const none = r.rows.filter(x => !x.pairs);
+  const top = Math.max(...rows.map(x => x.max), 0) || 1;
+  const pairs = r.rows.reduce((n, x) => Math.max(n, x.pairs), 0);
+  $('#repBody').innerHTML = !r.specimens.length
+    ? `<p>No specimen has been landmarked more than once yet. Use “Landmark again” in the Specimen tab, then come back here.</p>`
+    : `<p>How far apart your replicates landed, for ${plural(r.specimens.length, 'specimen')} landmarked more than once (${r.specimens.map(x => `${esc(x.id)} ×${x.replicates}`).join(', ')}). Largest differences first.</p>
+    ${u === 'px' ? `<p class="hint">In pixels. Measure the scale bar on every specimen to see millimetres instead.</p>` : ''}
+    <div class="cb-table"><table class="rep-table"><thead><tr><th>Landmark</th><th class="num">Specimens</th><th class="num">Average (${esc(u)})</th><th class="num">Largest (${esc(u)})</th><th aria-hidden="true"></th></tr></thead><tbody>
+      ${rows.map(x => `<tr${x.flag ? ' class="flag"' : ''}><td><span class="mono">${esc(x.id)}</span> ${esc(x.name || '')}${x.flag ? ' <span class="chip">check</span>' : ''}</td>
+        <td class="num">${x.specimens}</td><td class="num">${fmtD(x.mean)}</td><td class="num">${fmtD(x.max)}</td>
+        <td class="barcell" aria-hidden="true"><span class="rbar"><i style="width:${(100 * x.mean / top).toFixed(1)}%"></i><b style="left:${(100 * x.max / top).toFixed(1)}%"></b></span></td></tr>`).join('')}
+    </tbody></table></div>
+    ${rows.some(x => x.flag) ? `<p class="hint"><span class="chip">check</span> marks landmarks whose average is more than twice the typical value (${fmtD(r.median)} ${esc(u)}). Re-read their descriptions in the Template tab, or compare them across specimens (G).</p>` : ''}
+    ${none.length ? `<p class="hint">Not placed on two replicates yet: ${none.map(x => esc(x.id)).join(', ')}.</p>` : ''}
+    <p class="hint">Curves are compared point by point. For a full measurement-error analysis (for example Procrustes ANOVA in geomorph), use Export CSV: it has separate specimen_id and replicate columns.</p>`;
+  $('#dRep').showModal();
+}
+$('#repClose').onclick = () => $('#dRep').close();
+
 function renderSpecimenActions(){
+  renderReplicates();
   const el = $('#spActions');
   if (set.specimens.length < 2){ el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   el.innerHTML = removing
-    ? `<div class="tpl-confirm" style="margin:0"><p class="confirm-text">Remove ${esc(S.specimen.id)} from the set? Its landmarks stay saved in this browser, so opening the image again brings them back.</p>
+    ? `<div class="tpl-confirm" style="margin:0"><p class="confirm-text">Remove ${esc(labelOf(cur))} from the set? Its landmarks stay saved in this browser, so opening the image again brings them back.</p>
        <div class="confirm-actions"><button class="btn sm danger" type="button" data-act="remove-yes">Remove</button><button class="btn sm" type="button" data-act="remove-no">Cancel</button></div></div>`
     : `<button class="btn quiet" type="button" data-act="remove-spec">Remove this specimen from the set…</button>`;
 }
@@ -654,7 +717,7 @@ function applyManual(){
 function applyTemplate(t){
   pushUndo();
   C.applyTemplate(S, t);
-  if (!S.sel || S.sel.kind === 'adhoc' || !(S.sel.kind === 'lm' ? (tLm(S.sel.id) || lmEntry(S.sel.id)) : tCurve(S.sel.id))) S.sel = C.nextTodo(S, null);
+  if (!S.sel || S.sel.kind === 'adhoc' || !(S.sel.kind === 'lm' ? (tLm(S.sel.id) || lmEntry(S.sel.id)) : tCurve(S.sel.id))) S.sel = C.nextTodo(S, null, S.order);
   changed();
 }
 
@@ -672,9 +735,11 @@ function imageWarnings(im, sha, bmp){
   if (im.width && (im.width !== bmp.width || im.height !== bmp.height)) msgs.push(`Size is ${bmp.width} × ${bmp.height}, the file says ${im.width} × ${im.height}.`);
   return msgs.join(' ') || null;
 }
-function loadSaved(sha){
-  try { const t = sha && localStorage.getItem('lmk2d:' + sha); return t ? C.parseDoc(JSON.parse(t), 'Saved work') : null; }
-  catch { return null; }
+function loadSaved(sha, replicate){
+  try {
+    const t = sha && localStorage.getItem('lmk2d:' + sha + (replicate > 1 ? ':r' + replicate : ''));
+    return t ? C.parseDoc(JSON.parse(t), 'Saved work') : null;
+  } catch { return null; }
 }
 function uniqueId(id, except){
   let out = id || 'specimen', k = 2;
@@ -700,17 +765,21 @@ async function openImages(fileList){
       sha = await C.sha256Hex(buf);
       bmp = await createImageBitmap(new Blob([buf], { type:file.type || 'image/png' }));
     } catch { notes.push(`Couldn't read ${file.name}. Use JPG, PNG or WebP.`); continue; }
-    const open = C.findBySha(set, sha);
-    if (open && open.img){ already++; continue; }
-    let rec = (open && !open.img) ? open
-      : set.specimens.find(r => !r.img && !r.isSample && r.specimen.image.file === file.name)
-      || (files.length === 1 && cur && !cur.img && !cur.isSample ? cur : null);
-    if (rec){   // the image a landmark file was waiting for
-      rec.warn = imageWarnings(rec.specimen.image, sha, bmp);
-      rec.img = bmp; rec.imgSha = sha; rec.thumb = makeThumb(bmp); rec.view = null;
-      rec.specimen.image = { ...rec.specimen.image, file:file.name, sha256:sha, width:bmp.width, height:bmp.height };
-      added.push(rec); continue;
+    if (set.specimens.some(r => r.img && r.specimen.image.sha256 === sha)){ already++; continue; }
+    // specimens (and their replicates) opened from landmark files and waiting for this image
+    let waiting = set.specimens.filter(r => !r.img && !r.isSample && r.specimen.image.sha256 === sha);
+    if (!waiting.length) waiting = set.specimens.filter(r => !r.img && !r.isSample && r.specimen.image.file === file.name);
+    if (!waiting.length && files.length === 1 && cur && !cur.img && !cur.isSample) waiting = set.specimens.filter(r => r === cur || (!r.img && C.sameSpecimen(r, cur)));
+    if (waiting.length){
+      const thumb = makeThumb(bmp);
+      for (const w of waiting){
+        w.warn = imageWarnings(w.specimen.image, sha, bmp);
+        w.img = bmp; w.imgSha = sha; w.thumb = thumb; w.view = null;
+        w.specimen.image = { ...w.specimen.image, file:file.name, sha256:sha, width:bmp.width, height:bmp.height };
+      }
+      added.push(waiting[0]); continue;
     }
+    let rec;
     if (set.specimens.some(r => r.isSample)) resetSet();   // the sample makes way for real images
     rec = newRecord({ specimen:{ id:C.stem(file.name), image:{ file:file.name, sha256:sha, width:bmp.width, height:bmp.height } },
       img:bmp, imgSha:sha, thumb:makeThumb(bmp) });
@@ -724,6 +793,13 @@ async function openImages(fileList){
         Object.assign(rec, { raw:saved.raw, landmarks:saved.landmarks, curves:saved.curves, provenance:saved.provenance,
           specimen:{ ...saved.specimen, image:{ ...saved.specimen.image, file:file.name } } });
         restored++;
+        // replicates of this image saved in this browser come back too
+        for (let n = 2; n < 100; n++){
+          const more = loadSaved(sha, n); if (!more) break;
+          if (C.templateDifference(set.template, more.template)) continue;
+          newRecord({ raw:more.raw, landmarks:more.landmarks, curves:more.curves, provenance:more.provenance,
+            specimen:{ ...more.specimen, image:{ ...more.specimen.image, file:file.name } }, img:bmp, imgSha:sha, thumb:rec.thumb });
+        }
       }
     }
     rec.specimen.id = uniqueId(rec.specimen.id, rec);
@@ -784,13 +860,16 @@ async function openDataFiles(fileList){
       if (diff){ problems.push(`${en.name} was not opened: ${diff}. All specimens in a set must use the same template.`); continue; }
     }
     const fields = { raw:st.raw, landmarks:st.landmarks, curves:st.curves, provenance:st.provenance };
-    const bySha = C.findBySha(set, st.specimen.image.sha256);
+    const bySha = set.specimens.find(r => r.specimen.image.sha256 && r.specimen.image.sha256 === st.specimen.image.sha256 && C.replicateOf(r) === C.replicateOf(st));
     let rec;
     if (bySha && !hasData(bySha)){   // its image is already open: fill it in
       rec = Object.assign(bySha, fields, { specimen:{ ...st.specimen, image:{ ...st.specimen.image, file:bySha.specimen.image.file } } });
     } else if (set.specimens.some(r => r.specimen.id === st.specimen.id && C.replicateOf(r) === C.replicateOf(st))){
       problems.push(`${st.specimen.id} is already open, so ${en.name} was skipped.`); continue;
-    } else rec = newRecord({ ...fields, specimen:st.specimen });
+    } else {
+      const sibling = set.specimens.find(r => r.img && r.specimen.image.sha256 && r.specimen.image.sha256 === st.specimen.image.sha256);
+      rec = newRecord({ ...fields, specimen:st.specimen, ...(sibling ? { img:sibling.img, imgSha:sibling.imgSha, thumb:sibling.thumb } : {}) });
+    }
     added.push(rec);
   }
   if (added.length){
@@ -813,7 +892,8 @@ function autosave(){
     for (const r of set.specimens){
       const key = r.imgSha || r.specimen.image?.sha256;
       if (r.isSample || !key) continue;
-      try { localStorage.setItem('lmk2d:' + key, JSON.stringify(C.buildDoc(r, { operator:operator() || undefined }))); n++; } catch {}
+      const n_ = C.replicateOf(r);
+      try { localStorage.setItem('lmk2d:' + key + (n_ > 1 ? ':r' + n_ : ''), JSON.stringify(C.buildDoc(r, { operator:operator() || undefined }))); n++; } catch {}
     }
     if (n) $('#sSave').textContent = 'kept in this browser ' + new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   }, 500);
@@ -840,7 +920,7 @@ function openHandIn(){
   if (set.specimens.every(r => r.isSample)){ toast('Open your own images first. The sample is not part of a hand-in.', 5000); return; }
   $('#hiName').value = operator();
   $('#hiErr').textContent = '';
-  const rows = set.specimens.map(r => { const p = C.progress(r); return { id:r.specimen.id, ...p }; });
+  const rows = set.specimens.map(r => { const p = C.progress(r); return { id:labelOf(r), ...p }; });
   const unfinished = rows.filter(r => r.done < r.total);
   $('#hiSummary').innerHTML = `<p class="hint">${plural(rows.length, 'specimen')} in this hand-in:</p>
     <ul class="hi-list">${rows.map(r => `<li><span class="mono">${esc(r.id)}</span><span class="mono ${r.done === r.total ? 'ok' : 'bad'}">${r.done}/${r.total}</span></li>`).join('')}</ul>
@@ -1024,6 +1104,9 @@ $('#side').addEventListener('click', e => {
   else if (act === 'scale-remove'){ pushUndo(); delete S.specimen.image.scale; changed(); }
   else if (act === 'goto-template') selectTab($('#t-template'));
   else if (act === 'combine') openCombine();
+  else if (act === 'rep-new') landmarkAgain();
+  else if (act === 'rep-summary') openRepeatability();
+  else if (act === 'rep-go'){ const r = set.specimens.find(x => String(x.uid) === b.dataset.uid); if (r && r !== cur) switchTo(r); }
   else if (act === 'remove-spec'){ removing = true; renderSpecimenActions(); }
   else if (act === 'remove-no'){ removing = false; renderSpecimenActions(); }
   else if (act === 'remove-yes'){ removing = false; removeCurrent(); }
@@ -1040,12 +1123,14 @@ $('#side').addEventListener('change', e => {
   else if (id === 'spId'){
     const v = e.target.value.trim();
     if (!v){ e.target.value = S.specimen.id; return; }
-    if (set.specimens.some(r => r !== cur && r.specimen.id === v && C.replicateOf(r) === C.replicateOf(cur))){
+    if (set.specimens.some(r => !C.sameSpecimen(r, cur) && r.specimen.id === v)){
       toast(`Another specimen in the set is already called ${v}.`); e.target.value = S.specimen.id; return;
     }
+    for (const r of set.specimens.filter(r => r !== cur && C.sameSpecimen(r, cur))) r.specimen.id = v;   // its replicates
     S.specimen.id = v; renderSide(); autosave();
   }
   else if (id === 'spNotes'){ S.specimen.notes = e.target.value.trim(); autosave(); }
+  else if (id === 'repShuffle'){ repShuffle = e.target.checked; }
   else if (id === 'opName'){ try { localStorage.setItem('lmk2d:operator', e.target.value.trim()); } catch {} autosave(); }
 });
 

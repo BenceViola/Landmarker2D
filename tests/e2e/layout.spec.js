@@ -23,3 +23,14 @@ for (const scheme of ['light', 'dark']) {
     if (scheme === 'dark') expect(lum).toBeLessThan(0.2); else expect(lum).toBeGreaterThan(0.8);
   });
 }
+
+for (const width of [1400, 1024]) {
+  test(`toolbar sits above the image and panel at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 860 });
+    await openApp(page);
+    const [bar, work] = await page.evaluate(() => ['.bar', '.work'].map(s => document.querySelector(s).getBoundingClientRect().toJSON()));
+    expect(bar.height).toBeGreaterThan(28);
+    expect(bar.bottom).toBeLessThanOrEqual(work.top + 0.5);
+    await page.getByRole('tab', { name: 'Specimen' }).click({ timeout: 3000 });
+  });
+}
