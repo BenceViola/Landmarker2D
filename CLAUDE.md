@@ -21,6 +21,7 @@ The specification is `docs/landmark-json-spec.md` (a copy of the shared spec als
 - Ids are stable codes (`LM01`); names can change. Export order: template landmarks, curve points, ad hoc points, or `template.export_order`.
 - `n_points` excludes anchored curve ends. Templates must say `dimensions: 2`.
 - A newer minor version opens; a newer major version is refused.
+- **Planes** (spec v0.4, `template.planes`): 3D reference planes made from landmarks. This app doesn't use them but keeps them: their ids count as taken, renaming or removing a landmark updates their `landmarks` lists, and a template with planes is saved as format 0.4.0. They add no export rows.
 
 ## Tests
 

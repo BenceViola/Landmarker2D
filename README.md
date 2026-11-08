@@ -86,7 +86,7 @@ Plain JavaScript with no build step and no runtime dependencies, so it can be ho
 
 ## File format
 
-The full specification is in [docs/landmark-json-spec.md](docs/landmark-json-spec.md). This app implements `landmark-json` version 0.2, 2D section: one file per image, `specimen.image` (`file`, `sha256`, `width`, `height`, optional `scale`), template with `dimensions: 2`, statuses `placed` / `estimated` / `missing`. Fields the app doesn't know are kept when a file is saved again.
+The full specification is in [docs/landmark-json-spec.md](docs/landmark-json-spec.md). This app implements `landmark-json` version 0.2, 2D section: one file per image, `specimen.image` (`file`, `sha256`, `width`, `height`, optional `scale`), template with `dimensions: 2`, statuses `placed` / `estimated` / `missing`. Fields the app doesn't know are kept when a file is saved again. Reference planes (v0.4, used by the 3D app) are kept too, but not shown.
 
 Not yet supported: templates referenced by `ref` instead of embedded, the geomorph curve-sliders file, TIFF images.
 

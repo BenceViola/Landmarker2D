@@ -1,6 +1,6 @@
 # Landmark JSON Format Specification
 
-Copy of the shared `landmark-json` specification (updated 2026-11-07 with replicates, v0.3; Bence Viola), kept in this repository so the 2D app can be developed against it. The same format is used by the 3D landmarking app. This app implements the **2D data (v0.2)** section, fixed landmarks and curves; mesh-only parts (anchors, normals, surfaces) do not apply to images.
+Copy of the shared `landmark-json` specification (updated 2026-11-08 with planes, v0.4, and the fuller Curves section; Bence Viola), kept in this repository so the 2D app can be developed against it. The same format is used by the 3D landmarking app. This app implements the **2D data (v0.2)** section, fixed landmarks and curves; mesh-only parts (anchors, normals, surfaces) do not apply to images, and planes (v0.4) are kept when saving but not used.
 
 ## Purpose and principles
 
@@ -16,7 +16,7 @@ Design principles:
 
 ## File structure
 
-A file has five required top-level fields and four optional ones. The extension is `.lmk.json` (working name), so it opens in any text editor but is recognisable as a landmark file.
+A file has five required top-level fields and four optional ones. The extension is `.lmk.json`, so it opens in any text editor but is recognisable as a landmark file.
 
 | Field | Type | Required | Content |
 | --- | --- | --- | --- |
@@ -25,12 +25,14 @@ A file has five required top-level fields and four optional ones. The extension 
 | `specimen` | object | yes | `id`, optional `notes`, optional `replicate` (v0.3, see Replicates), and exactly one source: `mesh` (`file`, `sha256`, `units`, `vertex_count`, `face_count`) for 3D, or `image` for 2D (see 2D data). |
 | `template` | object | yes | Either embedded definitions, or `{ "ref": "<file or URL>", "id": "...", "version": "..." }`. |
 | `landmarks` | array | yes | Placed fixed landmarks (may be empty). |
-| `curves` | array | no | Reserved from v0.2. |
+| `curves` | array | no | Traced curves and their semilandmarks (v0.2), see Curves. |
 | `surfaces` | array | no | Reserved for later. |
 | `provenance` | object | no | `software`, `software_version`, `operator`, `created`, `modified` (ISO 8601). |
 | `extensions` | object | no | App- or lab-specific data, keyed by a namespace. |
 
 The `sha256` of the mesh or image lets the app warn when a file is opened against a different or modified source, which would silently shift every landmark.
+
+`vertex_count` and `face_count` are the raw counts as stored in the mesh file. For STL, which has no shared vertices, `vertex_count` is therefore 3 × `face_count`. No vertex merging is reflected in these numbers.
 
 ## Template
 
@@ -41,6 +43,7 @@ Template fields:
 - `id`, `name`, `version`, `dimensions` (`3` for meshes, `2` for images; defaults to 3 if absent), optional `description` and `author`.
 - `landmarks`: array of definitions, each with `id` (a short code such as `"LM01"`, never changed once data exists), `name` (the descriptor shown to students, e.g. `"Nasion"`, can be renamed freely), optional `description` (where exactly to place it), optional `image` (path or URL to a reference picture), and optional `bilateral_pair` (the `id` of its left/right counterpart).
 - `curves` (v0.2): array of curve definitions, see Curves.
+- `planes` (v0.4): optional array of reference planes defined by landmarks, see Planes.
 - `export_order`: array of ids giving the row order in TPS and CSV. If absent, the order of `landmarks` is used, followed by curve points in curve order.
 
 A specimen may contain a landmark that is not in the template (`"template_id": null`). This allows ad hoc landmarking without writing a template first; such points are exported after the template points.
@@ -54,16 +57,16 @@ Each entry in `landmarks` is one placed (or deliberately skipped) landmark.
 | `id` | string | yes | Unique within the file. Equals `template_id` when the landmark comes from the template. |
 | `template_id` | string or null | yes | The template definition this fulfils; null for ad hoc points. |
 | `label` | string | no | Display name; defaults to the template `name`. |
-| `status` | string | yes | `"placed"`, `"missing"` or `"estimated"` (see Missing data). |
+| `status` | string | yes | `"placed"`, `"missing"` or `"estimated"` (see Conventions). |
 | `position` | [x, y, z] or [x, y] | when not missing | Coordinates in mesh space, in `specimen.mesh.units`; in 2D, image pixels (see 2D data). Null when missing. |
-| `anchor` | object | no | `{ "face": <int>, "bary": [u, v, w] }`: the triangle index and barycentric weights of the picked point. 3D only. |
+| `anchor` | object | no | `{ "face": <int>, "bary": [u, v, w] }`: the triangle index (in the file's own face order) and barycentric weights of the picked point. 3D only. |
 | `normal` | [x, y, z] | no | Surface normal at the point; useful for display and later sliding. |
 | `placed_at` | string | no | ISO 8601 timestamp of the last edit. |
 | `note` | string | no | Free text, e.g. "broken here, estimated from contralateral side". |
 
 When `anchor` and `position` disagree (the mesh was changed), `position` wins and the app should warn and re-snap.
 
-## Curves (reserved, v0.2)
+## Curves (v0.2)
 
 A curve stores both what the user clicked and what was computed from it, so it can be re-edited and re-sampled later without losing the original intent.
 
@@ -84,6 +87,27 @@ Specimen curve entry:
 - `length`: path length in mesh units, and `sampling`: the `path`, `spacing` and `n_points` actually used.
 
 The TPS export writes `points` as ordinary rows; the curve definition file for geomorph sliding (which point slides between which neighbours) is generated from this structure.
+
+**Ids.** Curves share one set of ids with landmarks and planes (a curve can't be called `LM01`). Apps number new curves `C01`, `C02`, …
+
+**Number of points.** `n_points` semilandmarks are spaced at equal arc length:
+
+- Both ends anchored: the points lie strictly between the two landmarks, which are exported once, as landmarks.
+- A free end gets a semilandmark of its own at the end of the path; with both ends free, the first and last points are the curve's ends.
+- A closed loop gets `n_points` around the loop, starting at its first clicked point.
+- With one point it sits in the middle of the path.
+
+**Computing a curve in 3D (`"euclidean"`).** The path runs through the start landmark, the clicked points in order and the end landmark. Its straight segments are cut into short steps, and each step is moved to the nearest point on the surface, so the path follows the surface between the clicks. `length` is the length of that surface path. The semilandmarks are spaced along it and moved onto the surface too, so each has an `anchor` and a `normal` like a landmark. An open curve needs at least two points (counting anchored ends), a loop at least three. If an anchored landmark isn't placed, or is missing, the curve has no semilandmarks until it is placed. On thin structures the nearest surface can lie on the other side; `"geodesic"` paths (planned) avoid this.
+
+**When the template changes.** If `n_points` changes, curves already traced are re-sampled from their `control_points` when the mesh is open. A curve whose `points` don't match the template's `n_points` counts as not done in exports.
+
+**Exports.**
+
+- Rows follow `export_order` if it lists curve ids, otherwise landmarks first, then each curve's semilandmarks in curve order, then ad hoc points.
+- Each semilandmark is a row named `<curve id>_<nn>` (`C01_01`, `C01_02`, …). In CSV it has `type = curve`, the curve id in `curve` and its number in `index`.
+- A curve that is missing or not finished is written as `n_points` missing rows (TPS: the missing value; CSV: `NA` with status `missing` or `not_done`), so every specimen has the same rows.
+
+**Unknown curves.** A curve entry whose `template_id` isn't in the template is kept unchanged when the file is saved again, like any field the app doesn't know.
 
 ## Surface semilandmarks (reserved, later)
 
@@ -167,6 +191,34 @@ Export:
 
 - TPS: when a combined export holds more than one replicate of any specimen, every `ID=` line gets the suffix `_r<n>` (`SKULL_014_r1`, `SKULL_014_r2`), so IDs stay unique and the replicate can be read back. Otherwise `ID=` is the specimen ID alone.
 - CSV: separate `specimen_id` and `replicate` columns, ready to use as factors for a measurement-error analysis (e.g. Procrustes ANOVA in geomorph).
+
+## Planes (v0.4)
+
+A plane is a reference for display and checking, such as the midsagittal plane: midline landmarks should lie on it, and left/right pairs should lie at mirror distances from it. Planes are defined in the template from landmarks, so a plane is the same on every specimen and moves when its landmarks move. For now planes are used in 3D only; a 2D app keeps the field when saving but need not use it.
+
+- `template.planes`: optional array, each `{ "id": "PL01", "name": "Midsagittal", "landmarks": ["LM01", "LM03", "LM06"], "description": "..." }`. `description` is optional.
+- `id`: a short stable code, unique among all ids in the template (landmarks, curves and planes).
+- `landmarks`: ids of at least three template landmarks. With three, the plane passes through them. With more, it is the least-squares best-fit plane: the plane with the smallest sum of squared perpendicular distances to the points, whose normal is the eigenvector of the points' covariance matrix with the smallest eigenvalue.
+- The plane is computed from the current positions of its landmarks whenever it is needed. Its position and orientation are never stored, because coordinates are the truth.
+- Orientation: the normal points to the side given by the first three landmarks in list order (right-hand rule on `(B − A) × (C − A)`), so signed distances to the plane keep their sign from specimen to specimen.
+- On a specimen where fewer than three of a plane's landmarks have positions (missing or not yet placed), or where they lie (nearly) on one line, the plane is undefined there. Apps say so rather than guess.
+- Planes add no rows to TPS or CSV exports. Distances of landmarks to a plane are derived values that apps may show; they are not stored.
+- Planes from points clicked on the surface, rather than from landmarks, are not part of the format. Apps may offer them for exploring, but don't save them.
+
+A file whose template has planes is written as format version `0.4.0`. Older apps open it with a note about the newer version and keep `planes` when saving, as for any unknown field.
+
+```json
+"template": {
+  "id": "cranium-basic",
+  "version": "1.1",
+  "dimensions": 3,
+  "landmarks": [ ... ],
+  "planes": [
+    { "id": "PL01", "name": "Midsagittal", "landmarks": ["LM01", "LM02", "LM06", "LM07"],
+      "description": "Best fit through the midline landmarks." }
+  ]
+}
+```
 
 ## Conventions
 
@@ -254,11 +306,14 @@ A specimen with three template landmarks: two placed, one missing.
 }
 ```
 
-## Open questions
+## Decisions
 
 - [x] Decided: the template is embedded by default; referencing a shared template file is optional.
 - [x] Decided: landmark ids are short stable codes (`LM01`), with `name` as the human-readable descriptor.
 - [x] Decided: extension `.lmk.json`, format name `landmark-json`. No other use of `.lmk.json` was found; bare `.lmk` is used only in unrelated domains.
 - [ ] Deferred: a Slicer `.mrk.json` export is not planned for now but may be added later.
 - [x] Decided: v0.1 includes all three statuses, `placed`, `estimated` and `missing`.
+- [x] Decided: `vertex_count` and `face_count` are raw file counts (for STL, `vertex_count` = 3 × `face_count`).
 - [x] Decided: replicates are recorded in an optional `specimen.replicate` field (v0.3), not encoded in the specimen ID. Both apps follow this.
+- [x] Decided (2026-11-08): planes (v0.4) are optional template definitions built from landmarks (exact for three, best fit for more). Planes from clicked points are for exploring only and are not saved. The 2D app keeps them when saving but does not use them.
+- [x] Decided: semilandmark rows are named `<curve id>_<nn>` in both apps.

@@ -48,6 +48,9 @@
   /* ---------- lookups ---------- */
   const tLm = (s, id) => (s.template.landmarks || []).find(l => l.id === id);
   const tCurve = (s, id) => (s.template.curves || []).find(c => c.id === id);
+  // Planes (v0.4) are 3D reference planes; this app keeps them and their ids but doesn't use them.
+  const tPlane = (s, id) => (Array.isArray(s.template.planes) ? s.template.planes : []).find(p => p && p.id === id);
+  const planeList = t => (Array.isArray(t.planes) ? t.planes.filter(p => p && Array.isArray(p.landmarks)) : []);
   const lmEntry = (s, id) => s.landmarks.find(l => l.id === id);
   const curveEntry = (s, id) => s.curves.find(c => c.id === id);
   const scaleOf = s => (s.specimen.image && s.specimen.image.scale) || null;
@@ -343,6 +346,10 @@
     for (const l of t.landmarks) {
       if (l.bilateral_pair && !t.landmarks.some(x => x.id === l.bilateral_pair)) throw new Error(`${l.id}: pair ${l.bilateral_pair} is not in this template`);
     }
+    // Planes aren't shown in the text; they are kept from `base`, losing landmarks the text removed.
+    const pid = planeList(t).map(p => p.id).find(x => ids.includes(x));
+    if (pid) throw new Error(`Id ${pid} is used by a plane in this template`);
+    for (const pl of planeList(t)) pl.landmarks = pl.landmarks.filter(x => t.landmarks.some(l => l.id === x));
     return t;
   }
   function checkTemplate(t) {
@@ -369,13 +376,14 @@
   const TEMPLATE_FIELDS = ['id', 'name', 'version', 'description', 'author'];
   const MAX_CURVE_POINTS = 500;
 
-  const idInUse = (s, id) => !!(tLm(s, id) || tCurve(s, id) || anyLm(s, id) || anyCurve(s, id));
+  // Landmarks, curves and planes share one set of ids.
+  const idInUse = (s, id) => !!(tLm(s, id) || tCurve(s, id) || tPlane(s, id) || anyLm(s, id) || anyCurve(s, id));
   /** Next free id of the form LM01, LM02… or C01, C02… */
   function nextId(s, prefix) {
     const re = new RegExp('^' + prefix + '(\\d+)$');
     let n = 0;
     const placed = members(s).flatMap(m => [...m.landmarks, ...m.curves]);
-    for (const x of [...(s.template.landmarks || []), ...(s.template.curves || []), ...placed]) {
+    for (const x of [...(s.template.landmarks || []), ...(s.template.curves || []), ...planeList(s.template), ...placed]) {
       const m = re.exec(x.id);
       if (m) n = Math.max(n, Number(m[1]));
     }
@@ -441,6 +449,7 @@
       def.id = newId;
       for (const d of s.template.landmarks) if (d.bilateral_pair === id) d.bilateral_pair = newId;
       for (const c of s.template.curves || []) { if (c.start === id) c.start = newId; if (c.end === id) c.end = newId; }
+      for (const pl of planeList(s.template)) pl.landmarks = pl.landmarks.map(x => (x === id ? newId : x));
       renameInOrder(s.template, id, newId);
     }
     return null;
@@ -455,6 +464,8 @@
     for (const m of members(s)) m.landmarks = m.landmarks.filter(e => e.template_id !== id && e.id !== id);
     for (const d of t.landmarks) if (d.bilateral_pair === id) delete d.bilateral_pair;
     for (const c of t.curves || []) { if (c.start === id) delete c.start; if (c.end === id) delete c.end; }
+    // a plane loses the landmark (as in the 3D app; with fewer than three it is undefined until more are chosen there)
+    for (const pl of planeList(t)) pl.landmarks = pl.landmarks.filter(x => x !== id);
     dropFromOrder(t, id);
   }
 
@@ -578,7 +589,9 @@
     d.format = 'landmark-json';
     // Re-saving a file from a newer minor version keeps its version, since its extra fields are kept too.
     // a replicate after the first uses specimen.replicate, which needs format 0.3
-    d.version = newerVersion(d.version, replicateOf(s) > 1 ? '0.3.0' : FORMAT_VERSION);
+    // and a template with planes is written as 0.4 (spec: Planes)
+    const needed = planeList(s.template).length ? '0.4.0' : replicateOf(s) > 1 ? '0.3.0' : FORMAT_VERSION;
+    d.version = newerVersion(d.version, needed);
     const sp = clone(s.specimen);
     delete sp.mesh;
     if (opts.specimenId !== undefined) sp.id = opts.specimenId;
