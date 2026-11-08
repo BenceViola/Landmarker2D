@@ -2,7 +2,7 @@
 
 A lightweight browser tool for placing 2D landmarks and curve semilandmarks on images. It saves the `landmark-json` format (`.lmk.json`) and exports TPS and CSV for geometric morphometrics. It runs entirely in the browser: no installation, and images never leave the computer.
 
-It is the 2D companion of a 3D landmarking app that uses the same file format.
+It is the 2D companion of a 3D landmarking app that uses the same file format (https://benceviola.github.io/Landmarker3D/).
 
 ## Using it
 
