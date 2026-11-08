@@ -48,6 +48,9 @@
   /* ---------- lookups ---------- */
   const tLm = (s, id) => (s.template.landmarks || []).find(l => l.id === id);
   const tCurve = (s, id) => (s.template.curves || []).find(c => c.id === id);
+  /** A curve's number of semilandmarks: a positive whole number, or the default 10 (as in the 3D app). */
+  const DEFAULT_CURVE_POINTS = 10;
+  const nPointsOf = c => (c && Number.isInteger(c.n_points) && c.n_points > 0 ? c.n_points : DEFAULT_CURVE_POINTS);
   // Planes (v0.4) are 3D reference planes; this app keeps them and their ids but doesn't use them.
   const tPlane = (s, id) => (Array.isArray(s.template.planes) ? s.template.planes : []).find(p => p && p.id === id);
   const planeList = t => (Array.isArray(t.planes) ? t.planes.filter(p => p && Array.isArray(p.landmarks)) : []);
@@ -84,7 +87,9 @@
     const c = curveEntry(s, it.id);
     if (!c) return 'todo';
     if (c.status === 'missing') return 'missing';
-    if (c.points && c.points.length) return c.status === 'estimated' ? 'estimated' : 'placed';
+    // spec: a curve whose points don't match the template's n_points is not done
+    const t = tCurve(s, it.id);
+    if (c.points && c.points.length && (!t || c.points.length === nPointsOf(t))) return c.status === 'estimated' ? 'estimated' : 'placed';
     return c.control_points && c.control_points.length ? 'partial' : 'todo';
   }
   const isDone = (s, it) => ['placed', 'estimated', 'missing'].includes(itemState(s, it));
@@ -157,7 +162,8 @@
     if (closed) at = k => k * L / n;
     else {
       const den = n - 1 + a + b;
-      at = den > 0 ? (k => (k + a) * L / den) : (() => L / 2);
+      // spec: with one point it sits in the middle of the path, whichever ends are anchored
+      at = n === 1 ? (() => L / 2) : (k => (k + a) * L / den);
     }
     const pts = [];
     let j = 1;
@@ -185,9 +191,11 @@
       }
     }
     const path = t.path || 'polyline';
-    if (err || P.length < 2) return { ctrl: P, dense: P.length >= 2 ? densePath(P, path, !!t.closed) : [], pts: [], L: 0, err, a, b };
+    // spec: an open curve needs at least two points (counting anchored ends), a loop at least three
+    const need = t.closed ? 3 : 2;
+    if (err || P.length < need) return { ctrl: P, dense: P.length >= 2 ? densePath(P, path, !!t.closed) : [], pts: [], L: 0, err, a, b };
     const D = densePath(P, path, !!t.closed);
-    const { L, pts } = resample(D, t.n_points != null ? t.n_points : 10, a, b, !!t.closed);
+    const { L, pts } = resample(D, nPointsOf(t), a, b, !!t.closed);
     return { ctrl: P, dense: D, pts, L, err: null, a, b };
   }
   /** Recompute every curve's semilandmarks; geometry is kept in the private `_geom` field. */
@@ -200,7 +208,7 @@
       if (c.status === 'missing') { c.points = []; continue; }
       c.points = g.pts.map(p => ({ position: [r6(p[0]), r6(p[1])] }));
       c.length = r6(g.L);
-      c.sampling = { path: t.path || 'polyline', spacing: t.spacing || 'equal_arc_length', n_points: t.n_points != null ? t.n_points : 10 };
+      c.sampling = { path: t.path || 'polyline', spacing: t.spacing || 'equal_arc_length', n_points: nPointsOf(t) };
       if (!c.status) c.status = 'placed';
     }
   }
@@ -281,7 +289,7 @@
       const o = [];
       if (c.start) o.push('start=' + c.start);
       if (c.end) o.push('end=' + c.end);
-      o.push('n=' + (c.n_points != null ? c.n_points : 10));
+      o.push('n=' + (nPointsOf(c)));
       o.push('path=' + (c.path || 'polyline'));
       if (c.closed) o.push('closed');
       L.push(`curve ${c.id} | ${c.name || ''} | ${o.join(' ')}${c.description ? ' | ' + c.description : ''}`);
@@ -514,7 +522,7 @@
     if (err) return err;
     const name = 'name' in patch ? String(patch.name).trim() : c.name;
     if (!name) return 'Every curve needs a name.';
-    let n = c.n_points != null ? c.n_points : 10;
+    let n = nPointsOf(c);
     if ('n_points' in patch) {
       n = Number(patch.n_points);
       if (!Number.isInteger(n) || n < 1 || n > MAX_CURVE_POINTS) return `The number of points must be a whole number from 1 to ${MAX_CURVE_POINTS}.`;
@@ -658,7 +666,7 @@
         rows.push({ point: id, template_id: id, label: tLm(s, id).name, type: 'landmark', curve: '', index: '',
           pos: e && e.status !== 'missing' && e.position ? e.position : null, status: done ? e.status : 'not_done' });
       } else if (tCurve(s, id)) {
-        const t = tCurve(s, id), c = curveEntry(s, id), n = t.n_points != null ? t.n_points : 10;
+        const t = tCurve(s, id), c = curveEntry(s, id), n = nPointsOf(t);
         const ok = c && c.status !== 'missing' && c.points && c.points.length === n;
         for (let k = 0; k < n; k++) {
           rows.push({ point: `${id}_${String(k + 1).padStart(2, '0')}`, template_id: id, label: t.name, type: 'curve', curve: id, index: k + 1,
@@ -739,7 +747,7 @@
   function templateDifference(a, b) {
     const sig = t => JSON.stringify({
       lms: (t.landmarks || []).map(l => l.id),
-      curves: (t.curves || []).map(c => [c.id, c.n_points != null ? c.n_points : 10]),
+      curves: (t.curves || []).map(c => [c.id, nPointsOf(c)]),
       order: Array.isArray(t.export_order) && t.export_order.length ? t.export_order : null,
     });
     if ((a.id || '') !== (b.id || '')) return `it uses the template “${b.id}”, not “${a.id}”`;
@@ -897,7 +905,7 @@
       rows.push(summarise({ kind: 'lm', id: lm.id, name: lm.name }, d, specimens));
     }
     for (const c of T.curves || []) {
-      const n = c.n_points != null ? c.n_points : 10;
+      const n = nPointsOf(c);
       const d = []; let specimens = 0;
       for (const g of reps) {
         const lines = g.map(st => {
@@ -1010,7 +1018,7 @@
   return {
     SOFTWARE, SOFTWARE_VERSION, FORMAT_VERSION, STATUSES, UNITS,
     r6, fmt, dist, nowIso, stem, clone, sha256Hex, emptyTemplate, newState,
-    tLm, tCurve, lmEntry, curveEntry, scaleOf,
+    tLm, tCurve, nPointsOf, DEFAULT_CURVE_POINTS, lmEntry, curveEntry, scaleOf,
     items, adhocEntries, itemState, isDone, nextTodo,
     densePath, resample, curveGeom, recomputeCurves,
     placeLm, ensureCurve, newAdhocId, addAdhoc, setStatus, clearItem,

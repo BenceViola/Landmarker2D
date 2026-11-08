@@ -211,7 +211,7 @@ class TemplateEditor {
     const k = key(c.id);
     const err = this.errors.get('curve:' + c.id);
     const isSel = S.sel && S.sel.kind === 'curve' && S.sel.id === c.id;
-    const n = c.n_points ?? 10, path = c.path || 'polyline';
+    const n = C.nPointsOf(c), path = c.path || 'polyline';
     const lmOptions = cur => lms.map(x => `<option value="${esc(x.id)}"${cur === x.id ? ' selected' : ''}>${esc(x.id)} · ${esc(x.name)}</option>`).join('');
     const route = c.closed ? 'closed loop' : `${c.start || 'free'} → ${c.end || 'free'}`;
     const summary = `${n} point${n === 1 ? '' : 's'} · ${route} · ${path === 'spline' ? 'smooth' : 'straight'}${c.description ? ' · ' + c.description : ''}`;

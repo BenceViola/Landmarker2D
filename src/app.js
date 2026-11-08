@@ -350,7 +350,8 @@ function updateHint(){
   } else {
     const t = tCurve(S.sel.id), c = curveEntry(S.sel.id), n = c ? c.control_points.length : 0;
     const anch = t && !t.closed && (t.start || t.end) ? ` · ends snap to ${[t.start, t.end].filter(Boolean).join(' and ')}` : '';
-    html = `Click along <b>${esc(S.sel.id)}</b> ${esc(t ? t.name : '')} in order (${n} point${n === 1 ? '' : 's'})${anch}`;
+    const loop = t && t.closed && n < 3 ? ' · a closed loop needs at least 3 points' : '';
+    html = `Click along <b>${esc(S.sel.id)}</b> ${esc(t ? t.name : '')} in order (${n} point${n === 1 ? '' : 's'})${anch}${loop}`;
   }
   el.innerHTML = html;
 }
@@ -421,7 +422,7 @@ function renderSide(){
     h += `<div class="grouph">Curves</div>`;
     for (const t of T.curves){
       const c = curveEntry(t.id), st = itemState({ kind:'curve', id:t.id });
-      const xy = st === 'missing' ? 'missing' : c && c.points && c.points.length ? `${c.points.length} pts · ${f2(c.length || 0)} px` : c && c.control_points.length ? `${c.control_points.length} clicked` : `${t.n_points ?? 10} pts`;
+      const xy = st === 'missing' ? 'missing' : c && c.points && c.points.length ? `${c.points.length} pts · ${f2(c.length || 0)} px` : c && c.control_points.length ? `${c.control_points.length} clicked` : `${C.nPointsOf(t)} pts`;
       h += row('curve', t.id, t.name, xy, st);
     }
   }
@@ -685,7 +686,7 @@ function renderDetail(){
     ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
     <dl class="kv"><dt>path</dt><dd>${esc(t.path || 'polyline')}, equal arc length</dd><dt>anchors</dt><dd>${esc(anch)}</dd>
     <dt>clicked</dt><dd>${c ? c.control_points.length : 0} control points</dd>
-    <dt>output</dt><dd>${t.n_points ?? 10} semilandmarks${t.closed ? '' : ' (excl. anchored ends)'}</dd>
+    <dt>output</dt><dd>${C.nPointsOf(t)} semilandmarks${t.closed ? '' : ' (excl. anchored ends)'}</dd>
     ${c && c.points && c.points.length ? `<dt>length</dt><dd>${f2(c.length)} px${sc ? ` · ${f2(c.length * sc.value)} ${esc(sc.units)}` : ''}</dd>` : ''}</dl>
     ${g && g.err ? `<div class="warnbox"><span>${esc(g.err)}</span></div>` : ''}
     <div class="inline">${statusSeg(c ? (c.points && c.points.length || c.status === 'missing' ? c.status : null) : null)}</div>
